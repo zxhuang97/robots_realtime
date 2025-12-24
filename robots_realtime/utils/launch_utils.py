@@ -152,6 +152,7 @@ def _create_robot_client(robot_path_or_robot: Union[str, Robot, List[str]], serv
                 robot_dict,
                 process_pool=server_processes,
                 custom_remote_methods=ROBOT_PROTOCOL_METHODS,
+                wait_time_on_close=5.0,
             )
             return robot_client  # type: ignore
 

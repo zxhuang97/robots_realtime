@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional
 
 import portal
+import signal, os
 
 from robots_realtime.envs.configs.instantiate import instantiate
 from robots_realtime.robots.utils import Timeout
@@ -202,10 +203,11 @@ def launch_remote_get_local_handler(
     process_pool: Any = None,
     custom_remote_methods: Optional[Dict[str, bool]] = None,
     logging_config_path: str | None = None,
+    wait_time_on_close: float = 0.0,
 ) -> tuple[Any, Client]:
     if port is None:
         port = portal.free_port()
-    p = launch_remote_server(cfg, port, host, launch_remote, process_pool, custom_remote_methods, logging_config_path)
+    p = launch_remote_server(cfg, port, host, launch_remote, process_pool, custom_remote_methods, logging_config_path, wait_time_on_close)
 
     with Timeout(20, f"launching client: {cfg} at port {port}"):
         assert port is not None
@@ -221,6 +223,7 @@ def launch_remote_server(
     process_pool: Any = None,
     custom_remote_methods: Optional[Dict[str, bool]] = None,
     logging_config_path: str | None = None,
+    wait_time_on_close: float = 0.0,
 ) -> Any:
     if port is None:
         port = portal.free_port()
@@ -230,6 +233,17 @@ def launch_remote_server(
         obj = instantiate(cfg)
         assert port is not None
         remote_server = RemoteServer(obj, port, host, custom_remote_methods=custom_remote_methods)
+        
+        # Register signal handlers to call close() when process is killed
+        def signal_handler(signum, frame):
+            if signum == signal.SIGINT and wait_time_on_close > 0:
+                time.sleep(wait_time_on_close)
+            # Exit cleanly without printing stack trace
+            os._exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
         remote_server.serve()
 
     p = None

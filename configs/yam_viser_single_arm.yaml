@@ -19,3 +19,18 @@ agent:
 
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
+
+reset_pos:
+  - 0
+  - 0.3973
+  - 0.5384
+  - -0.1410
+  - 0
+  - 0
+home_pos:
+  - 0
+  - -0.004
+  - 0.1593
+  - -0.7712
+  - 0.0158
+  - -0.0120

@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import tyro
@@ -36,11 +36,12 @@ class LaunchConfig:
     max_steps: Optional[int] = None  # this is for testing
     save_path: Optional[str] = None
     station_metadata: Dict[str, str] = field(default_factory=dict)
-
+    reset_pos: Optional[List[float]] = None  # Reset position for robots (arm joints only, gripper preserved)
+    home_pos: Optional[List[float]] = None  # Home position for robots (arm joints only, gripper preserved)
 
 @dataclass
 class Args:
-    config_path: Tuple[str, ...] = ("~/yam_realtime/configs/yam_viser_bimanual.yaml",)
+    config_path: Tuple[str, ...] = ("configs/yam_viser_bimanual.yaml",)
 
 
 def main(args: Args) -> None:
@@ -60,11 +61,12 @@ def main(args: Args) -> None:
     logger.info("Starting realtime control system...")
 
     server_processes = []
+    env = None
+    agent = None
 
     try:
         logger.info("Loading configuration...")
         configs_dict = DictLoader.load([os.path.expanduser(x) for x in args.config_path])
-
         agent_cfg = configs_dict.pop("agent")
         sensors_cfg = configs_dict.pop("sensors", None)
         main_config = instantiate(configs_dict)
@@ -83,51 +85,36 @@ def main(args: Args) -> None:
         frequency = main_config.hz
         rate = Rate(frequency, rate_name="control_loop")
 
+        # Convert positions from list to numpy array if provided
+        # Handle both flat list and nested list (for multi-robot configs)
+        reset_pos_array = None
+        home_pos_array = None
+        if main_config.reset_pos is not None:
+            reset_pos_array = np.array(main_config.reset_pos)
+        if main_config.home_pos is not None:
+            home_pos_array = np.array(main_config.home_pos)
+        
         env = RobotEnv(
             robot_dict=robots,
             camera_dict=camera_dict,
             control_rate_hz=rate,
+            reset_pos=reset_pos_array,
+            home_pos=home_pos_array,
         )
 
         logger.info("Starting control loop...")
         _run_control_loop(env, agent, main_config)
-
+    
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt (Ctrl+C), shutting down gracefully...")
     except Exception as e:
         logger.error(f"Error during execution: {e}")
         raise e
     finally:
-        # Cleanup
-        logger.info("Shutting down...")
-        if "env" in locals():
-            env.close()
-        if "agent" in locals():
-            cleanup_processes(agent, server_processes)
+        # Cleanup - this will always run, even on KeyboardInterrupt
+        logger.info("[main] Shutting down... ")
+        env.close()
 
-def slow_move(env: RobotEnv, target_joint_pos: np.ndarray, duration: float = 3.0) -> None:
-    """Slowly move robot to target joint position.
-    
-    Args:
-        env: Robot environment
-        target_joint_pos: Target joint positions (1D array)
-        robot_name: Name of the robot to move (default: "left")
-        duration: Duration of the movement in seconds
-    """
-    
-    obs = env.get_obs()
-    control_rate_hz = env._rate.rate
-    num_steps = int(control_rate_hz * duration)
-    robot_names = list(env.get_all_robots().keys())
-    
-    for i in range(num_steps):
-        alpha = i / num_steps if num_steps > 0 else 1.0
-        action = {}
-        for robot_name in robot_names:
-            current_joint_pos = obs[robot_name]["joint_pos"]
-            command_joint_pos = target_joint_pos * alpha + current_joint_pos * (1 - alpha)
-            action[robot_name] = {"pos": np.concatenate([command_joint_pos, [0.0]])}
-        env.step(action)
-    obs = env.get_obs()
-    return obs
 
 def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None:
     """
@@ -142,14 +129,13 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
     steps = 0
     start_time = time.time()
     loop_count = 0
-    reset_pos = np.array([-2.75671264e-05,  3.97347212e-01,  5.38363695e-01, -1.41023830e-01, -2.29758534e-05,  6.00320209e-06])
     # Init environment and warm up agent
-    logger.info("Slowly moving to reset position...")
-    obs = slow_move(env, reset_pos)
+    obs = env.reset()
     logger.info(f"Action spec: {env.action_spec()}")
     agent.act(obs)
 
     # Main control loop
+
     while True:
         # Get action from agent
         with Timeout(30, "Agent action"):
@@ -172,6 +158,10 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
         if config.max_steps is not None and steps >= config.max_steps:
             logger.info(f"Reached max steps ({config.max_steps}), stopping...")
             break
+        if steps > 300:
+            logger.info(f"Reached 300 steps, stopping...")
+            break
+
 
 
 if __name__ == "__main__":

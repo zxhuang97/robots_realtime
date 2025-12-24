@@ -2,6 +2,7 @@ import time
 from typing import Any, Dict, Optional, Union
 
 import dm_env
+import numpy as np
 
 from robots_realtime.robots.robot import Robot
 from robots_realtime.robots.utils import Rate
@@ -19,6 +20,8 @@ class RobotEnv(dm_env.Environment):
         camera_dict: Optional[Dict[str, CameraDriver]] = None,
         control_rate_hz: Union[Rate, float] = 100.0,
         use_joint_state_as_action: bool = False,
+        reset_pos: Optional[np.ndarray] = None,
+        home_pos: Optional[np.ndarray] = None,
     ) -> None:
         self._robot_dict = robot_dict
         if isinstance(control_rate_hz, Rate):
@@ -29,6 +32,9 @@ class RobotEnv(dm_env.Environment):
         self._use_joint_state_as_action = use_joint_state_as_action
         # get camera dict
         self._camera_dict = camera_dict
+        # Store reset and home positions
+        self._reset_pos = reset_pos
+        self._home_pos = home_pos
 
     def robot(self, name: str) -> Robot:
         """Get the robot object.
@@ -111,6 +117,40 @@ class RobotEnv(dm_env.Environment):
         return observations
 
     def reset(self) -> Dict[str, Any]:  # type: ignore
+        """Reset the environment and move to reset position if configured."""
+        if self._reset_pos is not None:
+            return self.move_to_target_slowly(self._reset_pos, duration=2.0)
+        return self.get_obs()
+
+    def move_to_target_slowly(self, home_pos: Optional[np.ndarray] = None, duration: float = 2.0) -> Dict[str, Any]:
+        """Slowly move all robots to home position.
+        
+        Args:
+            home_pos: Target joint positions (1D array for arm joints, will be applied to all robots).
+                     If None, robots will stay at current position.
+            duration: Duration of the movement in seconds
+            
+        Returns:
+            obs: Observation after reaching home position
+        """
+        obs = self.get_obs()
+        
+        if home_pos is None:
+            return obs
+            
+        control_rate_hz = self._rate.rate
+        num_steps = int(control_rate_hz * duration)
+        robot_names = list(self._robot_dict.keys())
+        
+        for i in range(num_steps):
+            alpha = i / num_steps if num_steps > 0 else 1.0
+            action = {}
+            for robot_name in robot_names:
+                current_joint_pos = obs[robot_name]["joint_pos"]
+                command_arm_pos = home_pos * alpha + current_joint_pos * (1 - alpha)
+                command_joint_pos = np.concatenate([command_arm_pos, [0.0]]) # add gripper
+                action[robot_name] = {"pos": command_joint_pos}
+            self.step(action)
         return self.get_obs()
 
     def observation_spec(self):  # type: ignore
@@ -128,6 +168,20 @@ class RobotEnv(dm_env.Environment):
         return spec
 
     def close(self) -> None:
+        """Close the environment, moving to reset_pos then home_pos if configured."""
+        print("Closing environment...")
+       
+        if self._reset_pos is not None:
+            print("Moving to reset position...")
+            self.move_to_target_slowly(self._reset_pos, duration=2.0)
+            print("Reached reset position")
+
+        if self._home_pos is not None:
+            print("Moving to home position...")
+            self.move_to_target_slowly(self._home_pos, duration=2.0)
+            print("Reached home position")
+
+        
         # Close robots first to ensure safe shutdown
         for robot_name, robot in self._robot_dict.items():
             print(f"Closing robot {robot_name}")
