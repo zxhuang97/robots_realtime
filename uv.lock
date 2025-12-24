@@ -1237,6 +1237,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrealsense2"
+version = "2.56.5.9235"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1f/ab/f2c066a11f632dfcd79b467e728623da9489ed524eb36ec0cc14b497661a/pyrealsense2-2.56.5.9235-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:76d384ea99f257b4697a82cb3581b05cc69fadfd0701021ad76da098a3e240f0", size = 11067319, upload-time = "2025-07-28T14:59:23.129Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/c7/c609730c3587c395c3097a98c2d856914997454967bea07b3f8849c4af03/pyrealsense2-2.56.5.9235-cp311-cp311-win_amd64.whl", hash = "sha256:7761f610876c0d0039c9dff71f28ae7e73c77f353f1f3b60fb083350d6acf280", size = 7801923, upload-time = "2025-07-28T14:59:24.986Z" },
+]
+
+[[package]]
 name = "pyroki"
 version = "0.0.0"
 source = { git = "https://github.com/chungmin99/pyroki.git#2272d0ab8bf74026a2c8530b6b6174f3b19dcb97" }
@@ -1436,6 +1445,7 @@ dependencies = [
     { name = "omegaconf" },
     { name = "opencv-python" },
     { name = "portal" },
+    { name = "pyrealsense2" },
     { name = "pyroki" },
     { name = "robot-descriptions" },
     { name = "ruff" },
@@ -1473,6 +1483,7 @@ requires-dist = [
     { name = "opencv-python" },
     { name = "panda-python", marker = "extra == 'franka-panda'", path = "dependencies/panda_py_0.7.5_libfranka_0.10.0/panda_python-0.7.5+libfranka.0.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl" },
     { name = "portal" },
+    { name = "pyrealsense2", specifier = ">=2.56.5.9235" },
     { name = "pyroki", git = "https://github.com/chungmin99/pyroki.git" },
     { name = "pyzed", marker = "extra == 'sensors'", path = "dependencies/pyzed-5.1-cp311-cp311-linux_x86_64.whl" },
     { name = "robot-descriptions" },

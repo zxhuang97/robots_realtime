@@ -29,6 +29,7 @@ class CameraData:
     calibration_data: Optional[dict] = None
     imu_data: Optional[IMUData] = None  # Optional IMU data
     other_sensors: Optional[dict] = None  # Optional dictionary for additional sensors
+    depth_data: Optional[np.ndarray] = None  # Optional depth data
 
 
 class CameraDriver(Protocol):
@@ -200,16 +201,17 @@ class DummyCamera(CameraDriver):
 if __name__ == "__main__":
     cfg = """
     top_camera:
-        _target_: yam_realtime.camera.camera.CameraNode
+        _target_: robots_realtime.sensors.cameras.camera.CameraNode
         camera:
-            _target_: yam_realtime.camera.opencv_camera.OpencvCamera
-            device_path: "/dev/video0"
+            _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
+            device_path: "/dev/video8"
             camera_type: "realsense_camera"
     """
     import yaml
+    import cv2
     from tqdm import tqdm
-    from yam_realtime.utils.portal_utils import launch_remote_get_local_handler
-
+    from robots_realtime.utils.portal_utils import launch_remote_get_local_handler
+    import matplotlib.pyplot as plt
     camera_config = yaml.safe_load(cfg)
     ps, clients = [], []
 
@@ -219,9 +221,25 @@ if __name__ == "__main__":
         ps.append(p)
         clients.append(client)
 
-    for _ in tqdm(range(100)):
+    images = []
+    for i in tqdm(range(100)):
         dats = [c.read() for c in clients]
+        frame = dats[0]["images"]["rgb"]
+        print(f"data: {frame.shape}")
+        images.append(frame)
         time.sleep(0.1)
+
+    if len(images) > 0:
+        height, width, _ = images[0].shape
+        fps = 1.0 / 0.1  # match sleep interval above
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out_path = "camera_test.mp4"
+        writer = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+        for img in images:
+            bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            writer.write(bgr)
+        writer.release()
+        print(f"Saved video to {out_path}")
 
     for c in clients:
         c.close()

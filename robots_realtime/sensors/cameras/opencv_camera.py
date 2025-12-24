@@ -23,6 +23,7 @@ class OpencvCamera(CameraDriver):
     resolution: Tuple[int, int] = (640, 480)
     fps: int = 30
     name: Optional[str] = None
+    intrinsic_data: Optional[dict] = None
 
     def __repr__(self) -> str:
         return f"OpencvCamera(device_path={self.device_path!r}, name={self.name!r}, resolution={self.resolution}, fps={self.fps})"
@@ -32,6 +33,9 @@ class OpencvCamera(CameraDriver):
         logging.info(f"available_cameras: {available_cameras}")
 
         self.cap = cv2.VideoCapture(self.device_path)
+        if not self.cap.isOpened():
+            logging.error(f"Failed to open camera at {self.device_path}")
+            raise RuntimeError(f"Failed to open camera at {self.device_path}")
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
