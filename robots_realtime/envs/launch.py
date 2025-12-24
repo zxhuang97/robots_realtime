@@ -152,9 +152,6 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
 
         if config.max_steps is not None and steps >= config.max_steps:
             logger.info(f"Reached max steps ({config.max_steps}), stopping...")
-            break
-        if steps > 500:
-            logger.info(f"Reached 300 steps, stopping...")
             agent.compare_trajectories()
             break
 

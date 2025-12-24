@@ -95,7 +95,7 @@ class AsyncDiffusionAgent(PolicyAgent):
 
         images = {}
         for k in self.config.image_keys:
-            img = obs[k]
+            img = obs[k]Max error: 0.255970
             img = image_tools.convert_to_uint8(image_tools.resize_with_pad(img, 224, 224))
             img = np.transpose(img, (2, 0, 1))
             images[k] = img

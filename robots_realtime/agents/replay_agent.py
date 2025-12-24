@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 from dm_env.specs import Array
 
@@ -102,19 +103,19 @@ class ReplayAgent(Agent):
         if len(self.replayed_left_joint_pos) == 0:
             print("Warning: No observations recorded during replay. Cannot compare trajectories.")
             return
-        
+
         # Convert lists to numpy arrays
         replayed_left_joint = np.array(self.replayed_left_joint_pos)
         replayed_right_joint = np.array(self.replayed_right_joint_pos)
         replayed_left_gripper = np.array(self.replayed_left_gripper_pos)
         replayed_right_gripper = np.array(self.replayed_right_gripper_pos)
-        
+
         # Ensure arrays are 2D
         if replayed_left_gripper.ndim == 1:
             replayed_left_gripper = replayed_left_gripper.reshape(-1, 1)
         if replayed_right_gripper.ndim == 1:
             replayed_right_gripper = replayed_right_gripper.reshape(-1, 1)
-        
+
         # Align lengths (take minimum to avoid index errors)
         min_len = min(
             len(self.stored_left_joint_pos),
@@ -122,7 +123,7 @@ class ReplayAgent(Agent):
             len(replayed_left_joint),
             len(replayed_right_joint)
         )
-        
+
         stored_left_joint = self.stored_left_joint_pos[:min_len]
         stored_right_joint = self.stored_right_joint_pos[:min_len]
         stored_left_gripper = self.stored_left_gripper_pos[:min_len]
@@ -131,13 +132,13 @@ class ReplayAgent(Agent):
         replayed_right_joint = replayed_right_joint[:min_len]
         replayed_left_gripper = replayed_left_gripper[:min_len]
         replayed_right_gripper = replayed_right_gripper[:min_len]
-        
+
         # Compute errors
         left_joint_error = np.abs(replayed_left_joint - stored_left_joint)
         right_joint_error = np.abs(replayed_right_joint - stored_right_joint)
         left_gripper_error = np.abs(replayed_left_gripper - stored_left_gripper.reshape(-1, 1))
         right_gripper_error = np.abs(replayed_right_gripper - stored_right_gripper.reshape(-1, 1))
-        
+
         # Print comparison results
         print("\n" + "="*60)
         print("TRAJECTORY COMPARISON RESULTS")
@@ -160,6 +161,116 @@ class ReplayAgent(Agent):
         print(f"  Max error: {np.max(right_gripper_error):.6f}")
         print(f"  RMS error: {np.sqrt(np.mean(right_gripper_error**2)):.6f}")
         print("="*60 + "\n")
+
+        # Plot joint trajectories: one figure per arm, 2x4 grid (6 joints + 1 gripper = 7 subplots)
+        timesteps = np.arange(min_len)
+
+        # Left arm: 6 joints + 1 gripper in 2x4 grid
+        num_left_joints = stored_left_joint.shape[1]
+        fig_left, axes_left = plt.subplots(2, 4, sharex=True, figsize=(16, 8))
+        fig_left.suptitle("Left Arm Trajectories (Stored vs Replayed)")
+        axes_left_flat = axes_left.flatten()
+        
+        # Plot 6 joints
+        for j in range(num_left_joints):
+            ax = axes_left_flat[j]
+            ax.plot(timesteps, stored_left_joint[:, j], label="Stored", linestyle="-")
+            ax.plot(timesteps, replayed_left_joint[:, j], label="Replayed", linestyle="--")
+            ax.set_ylabel(f"Joint {j}")
+            ax.grid(True, linestyle=":")
+            if j == 0:
+                ax.legend()
+            
+            # Add error statistics text
+            joint_error = left_joint_error[:, j]
+            mean_err = np.mean(joint_error)
+            max_err = np.max(joint_error)
+            ax.text(0.98, 0.98, f"Mean: {mean_err:.6f}\nMax: {max_err:.6f}", 
+                   transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                   horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Plot gripper (7th subplot)
+        stored_left_gripper_flat = stored_left_gripper.flatten() if stored_left_gripper.ndim > 1 else stored_left_gripper
+        replayed_left_gripper_flat = replayed_left_gripper.flatten() if replayed_left_gripper.ndim > 1 else replayed_left_gripper
+        ax_gripper = axes_left_flat[6]
+        ax_gripper.plot(timesteps, stored_left_gripper_flat[:min_len], label="Stored", linestyle="-")
+        ax_gripper.plot(timesteps, replayed_left_gripper_flat[:min_len], label="Replayed", linestyle="--")
+        ax_gripper.set_ylabel("Gripper")
+        ax_gripper.grid(True, linestyle=":")
+        
+        # Add error statistics text for gripper
+        gripper_error_flat = left_gripper_error.flatten()
+        mean_err = np.mean(gripper_error_flat)
+        max_err = np.max(gripper_error_flat)
+        ax_gripper.text(0.98, 0.98, f"Mean: {mean_err:.6f}\nMax: {max_err:.6f}", 
+                       transform=ax_gripper.transAxes, fontsize=9, verticalalignment='top',
+                       horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Hide the 8th subplot (unused)
+        axes_left_flat[7].axis('off')
+        
+        # Set xlabel on bottom row
+        for j in range(4, 8):
+            if j != 7:  # Skip the hidden subplot
+                axes_left_flat[j].set_xlabel("Timestep")
+        fig_left.tight_layout(rect=(0, 0.03, 1, 0.95))
+        left_fig_path = os.path.join(self.episode_dir, "left_trajectory.png")
+        fig_left.savefig(left_fig_path)
+
+        # Right arm: 6 joints + 1 gripper in 2x4 grid
+        num_right_joints = stored_right_joint.shape[1]
+        fig_right, axes_right = plt.subplots(2, 4, sharex=True, figsize=(16, 8))
+        fig_right.suptitle("Right Arm Trajectories (Stored vs Replayed)")
+        axes_right_flat = axes_right.flatten()
+        
+        # Plot 6 joints
+        for j in range(num_right_joints):
+            ax = axes_right_flat[j]
+            ax.plot(timesteps, stored_right_joint[:, j], label="Stored", linestyle="-")
+            ax.plot(timesteps, replayed_right_joint[:, j], label="Replayed", linestyle="--")
+            ax.set_ylabel(f"Joint {j}")
+            ax.grid(True, linestyle=":")
+            if j == 0:
+                ax.legend()
+            
+            # Add error statistics text
+            joint_error = right_joint_error[:, j]
+            mean_err = np.mean(joint_error)
+            max_err = np.max(joint_error)
+            ax.text(0.98, 0.98, f"Mean: {mean_err:.6f}\nMax: {max_err:.6f}", 
+                   transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                   horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Plot gripper (7th subplot)
+        stored_right_gripper_flat = stored_right_gripper.flatten() if stored_right_gripper.ndim > 1 else stored_right_gripper
+        replayed_right_gripper_flat = replayed_right_gripper.flatten() if replayed_right_gripper.ndim > 1 else replayed_right_gripper
+        ax_gripper = axes_right_flat[6]
+        ax_gripper.plot(timesteps, stored_right_gripper_flat[:min_len], label="Stored", linestyle="-")
+        ax_gripper.plot(timesteps, replayed_right_gripper_flat[:min_len], label="Replayed", linestyle="--")
+        ax_gripper.set_ylabel("Gripper")
+        ax_gripper.grid(True, linestyle=":")
+        
+        # Add error statistics text for gripper
+        gripper_error_flat = right_gripper_error.flatten()
+        mean_err = np.mean(gripper_error_flat)
+        max_err = np.max(gripper_error_flat)
+        ax_gripper.text(0.98, 0.98, f"Mean: {mean_err:.6f}\nMax: {max_err:.6f}", 
+                       transform=ax_gripper.transAxes, fontsize=9, verticalalignment='top',
+                       horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Hide the 8th subplot (unused)
+        axes_right_flat[7].axis('off')
+        
+        # Set xlabel on bottom row
+        for j in range(4, 8):
+            if j != 7:  # Skip the hidden subplot
+                axes_right_flat[j].set_xlabel("Timestep")
+        fig_right.tight_layout(rect=(0, 0.03, 1, 0.95))
+        right_fig_path = os.path.join(self.episode_dir, "right_trajectory.png")
+        fig_right.savefig(right_fig_path)
+
+        plt.close(fig_left)
+        plt.close(fig_right)
 
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:
