@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple, Union
 
+import numpy as np
 import tyro
 
 from robots_realtime.agents.agent import Agent
@@ -102,6 +103,31 @@ def main(args: Args) -> None:
         if "agent" in locals():
             cleanup_processes(agent, server_processes)
 
+def slow_move(env: RobotEnv, target_joint_pos: np.ndarray, duration: float = 3.0) -> None:
+    """Slowly move robot to target joint position.
+    
+    Args:
+        env: Robot environment
+        target_joint_pos: Target joint positions (1D array)
+        robot_name: Name of the robot to move (default: "left")
+        duration: Duration of the movement in seconds
+    """
+    
+    obs = env.get_obs()
+    control_rate_hz = env._rate.rate
+    num_steps = int(control_rate_hz * duration)
+    robot_names = list(env.get_all_robots().keys())
+    
+    for i in range(num_steps):
+        alpha = i / num_steps if num_steps > 0 else 1.0
+        action = {}
+        for robot_name in robot_names:
+            current_joint_pos = obs[robot_name]["joint_pos"]
+            command_joint_pos = target_joint_pos * alpha + current_joint_pos * (1 - alpha)
+            action[robot_name] = {"pos": np.concatenate([command_joint_pos, [0.0]])}
+        env.step(action)
+    obs = env.get_obs()
+    return obs
 
 def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None:
     """
@@ -116,9 +142,10 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
     steps = 0
     start_time = time.time()
     loop_count = 0
-
+    reset_pos = np.array([-2.75671264e-05,  3.97347212e-01,  5.38363695e-01, -1.41023830e-01, -2.29758534e-05,  6.00320209e-06])
     # Init environment and warm up agent
-    obs = env.reset()
+    logger.info("Slowly moving to reset position...")
+    obs = slow_move(env, reset_pos)
     logger.info(f"Action spec: {env.action_spec()}")
     agent.act(obs)
 

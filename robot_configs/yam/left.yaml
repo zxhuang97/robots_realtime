@@ -11,8 +11,8 @@ motor_chain:
     - [0x07, "DM4310"]
   motor_offset: [0, 0, 0, 0, 0, 0, 0]
   motor_direction: [1, 1, 1, 1, 1, 1, 1]
-  # channel: "can_left"
-  channel: "can_follow_l"
+  channel: "can2"
+  # channel: "can_follow_l"
   motor_chain_name: "yam_left"
   receive_mode:
     _target_: i2rt.motor_drivers.dm_driver.ReceiveMode

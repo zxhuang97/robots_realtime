@@ -27,6 +27,7 @@ dependencies = [
     "msgpack_numpy",
     "minimalmodbus",
     "i2rt",
+    "ipdb>=0.13.13",
 ]
 
 [project.optional-dependencies]

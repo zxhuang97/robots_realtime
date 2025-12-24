@@ -128,9 +128,16 @@ class RobotEnv(dm_env.Environment):
         return spec
 
     def close(self) -> None:
-        assert self._camera_dict is not None, "Camera dictionary is not set."
-        for camera_name, client in self._camera_dict.items():
-            print(f"closing camera {camera_name}")
-            client.close()  # type: ignore
+        # Close robots first to ensure safe shutdown
+        for robot_name, robot in self._robot_dict.items():
+            print(f"Closing robot {robot_name}")
+            if hasattr(robot, "close"):
+                robot.close()
+        
+        # Close cameras
+        if self._camera_dict is not None:
+            for camera_name, client in self._camera_dict.items():
+                print(f"Closing camera {camera_name}")
+                client.close()  # type: ignore
 
         print("Environment closed.")

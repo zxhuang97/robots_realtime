@@ -11,6 +11,7 @@ _target_: robots_realtime.envs.launch.LaunchConfig
 
 robots:
   left: ["robot_configs/yam/left.yaml"]
+  # right: ["robot_configs/yam/left.yaml", "robot_configs/yam/right.yaml"]
 
 agent:
   _target_: robots_realtime.agents.teleoperation.yam_pyroki_viser_agent.YamPyrokiViserAgent
