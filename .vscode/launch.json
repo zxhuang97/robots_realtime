@@ -1,0 +1,40 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: yam_replay_bimanual",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "robots_realtime.envs.launch",
+            "args": [
+                "--config_path",
+                "configs/yam_replay_bimanual.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "LOCAL_AGENT_DEBUG": "1"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python"
+        },
+        {
+            "name": "Debug: yam_replay_bimanual (uv run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.venv/bin/uv",
+            "args": [
+                "run",
+                "robots_realtime/envs/launch.py",
+                "--config_path",
+                "configs/yam_replay_bimanual.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}
+

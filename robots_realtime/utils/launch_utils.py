@@ -3,6 +3,7 @@ Utilities for launching and configuring robots, sensors, and agents.
 """
 
 import logging
+import os
 import subprocess
 import time
 from functools import partial
@@ -185,6 +186,10 @@ def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> 
     """
     logger.info("Initializing agent...")
 
+    if os.environ.get("LOCAL_AGENT_DEBUG") == "1":
+        logger.info("LOCAL_AGENT_DEBUG=1: Instantiating agent locally for debugging")
+        return instantiate(agent_cfg)
+
     if "Client" in agent_cfg["_target_"]:
         agent = instantiate(agent_cfg)
     else:
@@ -193,6 +198,8 @@ def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> 
             "act": False,
             "reset": False,
             "close": False,
+            "get_initial_state": False,  # Needs serialization for dict return
+            "compare_trajectories": False,
         }
         _, agent = launch_remote_get_local_handler(agent_cfg, custom_remote_methods=agent_remote_methods)
         server_processes.append(_)  # Track the server process

@@ -32,9 +32,32 @@ class RobotEnv(dm_env.Environment):
         self._use_joint_state_as_action = use_joint_state_as_action
         # get camera dict
         self._camera_dict = camera_dict
-        # Store reset and home positions
-        self._reset_pos = reset_pos
-        self._home_pos = home_pos
+        
+        # Convert reset_pos and home_pos arrays to dictionaries
+        # Get current robot observations to extract gripper positions
+        robot_obs_dict = {}
+        for robot_name, robot in robot_dict.items():
+            robot_obs_dict[robot_name] = robot.get_observations()
+        
+        self._reset_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None
+        self._home_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None
+        
+        if reset_pos is not None:
+            self._reset_pos = {}
+            for robot_name in robot_dict.keys():
+                self._reset_pos[robot_name] = {
+                    "arm_pos": reset_pos,
+                    "gripper_pos": robot_obs_dict[robot_name]["gripper_pos"],
+                }
+        
+        if home_pos is not None:
+            self._home_pos = {}
+            for robot_name in robot_dict.keys():
+                current_gripper_pos = robot_obs_dict[robot_name]["gripper_pos"]
+                self._home_pos[robot_name] = {
+                    "arm_pos": home_pos,
+                    "gripper_pos": current_gripper_pos,
+                }
 
     def robot(self, name: str) -> Robot:
         """Get the robot object.
@@ -116,39 +139,57 @@ class RobotEnv(dm_env.Environment):
 
         return observations
 
-    def reset(self) -> Dict[str, Any]:  # type: ignore
-        """Reset the environment and move to reset position if configured."""
-        if self._reset_pos is not None:
-            return self.move_to_target_slowly(self._reset_pos, duration=2.0)
-        return self.get_obs()
-
-    def move_to_target_slowly(self, home_pos: Optional[np.ndarray] = None, duration: float = 2.0) -> Dict[str, Any]:
-        """Slowly move all robots to home position.
+    def reset(self, reset_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None, duration: float = 2.0) -> Dict[str, Any]:  # type: ignore
+        """Reset the environment and move to reset position if configured.
         
         Args:
-            home_pos: Target joint positions (1D array for arm joints, will be applied to all robots).
-                     If None, robots will stay at current position.
+            reset_pos: Optional reset position dictionary mapping robot names to dicts with 'arm_pos' and 'gripper_pos' keys.
+                      If None, uses self._reset_pos if configured.
+        """
+        target_pos = reset_pos if reset_pos is not None else self._reset_pos
+        if target_pos is not None:
+            return self.move_to_target_slowly(target_pos, duration=duration)
+        return self.get_obs()
+
+    def move_to_target_slowly(self, target_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None, duration: float = 2.0) -> Dict[str, Any]:
+        """Slowly move all robots to target position.
+        
+        Args:
+            target_pos: Target joint positions dictionary mapping robot names to dicts with 'arm_pos' and 'gripper_pos' keys.
+                       If None, robots will stay at current position.
             duration: Duration of the movement in seconds
             
         Returns:
-            obs: Observation after reaching home position
+            obs: Observation after reaching target position
         """
         obs = self.get_obs()
         
-        if home_pos is None:
+        if target_pos is None:
             return obs
-            
+        
         control_rate_hz = self._rate.rate
+        assert control_rate_hz is not None, "Control rate must be set"
         num_steps = int(control_rate_hz * duration)
         robot_names = list(self._robot_dict.keys())
-        
         for i in range(num_steps):
             alpha = i / num_steps if num_steps > 0 else 1.0
             action = {}
             for robot_name in robot_names:
-                current_joint_pos = obs[robot_name]["joint_pos"]
-                command_arm_pos = home_pos * alpha + current_joint_pos * (1 - alpha)
-                command_joint_pos = np.concatenate([command_arm_pos, [0.0]]) # add gripper
+                current_arm_pos = obs[robot_name]["joint_pos"]
+                current_gripper_pos = obs[robot_name]["gripper_pos"]
+                
+                if robot_name in target_pos:
+                    robot_target = target_pos[robot_name]
+                    target_arm_pos = robot_target["arm_pos"]
+                    target_gripper_pos = robot_target["gripper_pos"]
+                else:
+                    # If robot not in dict, keep current position
+                    target_arm_pos = current_arm_pos
+                    target_gripper_pos = current_gripper_pos
+                
+                command_arm_pos = target_arm_pos * alpha + current_arm_pos * (1 - alpha)
+                command_gripper_pos = target_gripper_pos * alpha + current_gripper_pos * (1 - alpha)
+                command_joint_pos = np.concatenate([command_arm_pos, command_gripper_pos])
                 action[robot_name] = {"pos": command_joint_pos}
             self.step(action)
         return self.get_obs()

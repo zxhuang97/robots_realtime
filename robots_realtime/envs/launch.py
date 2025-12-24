@@ -12,6 +12,7 @@ import numpy as np
 import tyro
 
 from robots_realtime.agents.agent import Agent
+from robots_realtime.agents.replay_agent import ReplayAgent
 from robots_realtime.envs.configs.instantiate import instantiate
 from robots_realtime.envs.configs.loader import DictLoader
 from robots_realtime.envs.robot_env import RobotEnv
@@ -26,6 +27,7 @@ from robots_realtime.utils.launch_utils import (
     setup_can_interfaces,
     setup_logging,
 )
+from robots_realtime.utils.portal_utils import Client
 
 
 @dataclass
@@ -129,21 +131,14 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
     steps = 0
     start_time = time.time()
     loop_count = 0
-    # Init environment and warm up agent
-    obs = env.reset()
+    reset_pos = agent.get_initial_state()
+    obs = env.reset(reset_pos=reset_pos, duration=2.0)
     logger.info(f"Action spec: {env.action_spec()}")
-    agent.act(obs)
 
     # Main control loop
-
     while True:
-        # Get action from agent
-        with Timeout(30, "Agent action"):
-            action = agent.act(obs)
-
-        # Execute action in environment
-        with Timeout(1, "Env step", "warning"):
-            obs = env.step(action)
+        action = agent.act(obs)
+        obs = env.step(action)
 
         steps += 1
         loop_count += 1
@@ -158,8 +153,9 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
         if config.max_steps is not None and steps >= config.max_steps:
             logger.info(f"Reached max steps ({config.max_steps}), stopping...")
             break
-        if steps > 300:
+        if steps > 500:
             logger.info(f"Reached 300 steps, stopping...")
+            agent.compare_trajectories()
             break
 
 

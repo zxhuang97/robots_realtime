@@ -83,6 +83,9 @@ class YamPyrokiViserAgent(Agent):
 
             time.sleep(0.02)
 
+    def get_initial_state(self):
+        return None
+        
     def act(self, obs: Dict[str, Any]) -> Any:
         self.obs = deepcopy(obs)
 
