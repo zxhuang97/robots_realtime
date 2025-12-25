@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from dm_env.specs import Array
@@ -44,6 +45,13 @@ class ReplayAgent(Agent):
         self.replayed_right_joint_pos = []
         self.replayed_left_gripper_pos = []
         self.replayed_right_gripper_pos = []
+        
+        # Storage for replayed camera images
+        self.replayed_camera_images = {
+            "top_camera": [],
+            "left_camera": [],
+            "right_camera": []
+        }
         
         # Initialize forward kinematics if enabled
         self.left_fk = None
@@ -108,11 +116,19 @@ class ReplayAgent(Agent):
             self.replayed_right_joint_pos.append(obs["right"]["joint_pos"].copy())
             self.replayed_right_gripper_pos.append(obs["right"]["gripper_pos"].copy())
         
+        # Record camera images if available
+        for camera_name in ["top_camera", "left_camera", "right_camera"]:
+            if camera_name in obs and "images" in obs[camera_name] and "rgb" in obs[camera_name]["images"]:
+                rgb_image = obs[camera_name]["images"]["rgb"]
+                if rgb_image is not None:
+                    self.replayed_camera_images[camera_name].append(rgb_image.copy())
+        
         self.current_step += 1
         
         # Compare trajectories if replay finished
         if replay_finished:
             self.compare_trajectories()
+            self.compare_camera_images()
             self._comparison_done = True
         
         return {
@@ -489,6 +505,202 @@ class ReplayAgent(Agent):
         right_ee_fig_path = os.path.join(self.episode_dir, "right_ee_trajectory.png")
         fig_right_ee.savefig(right_ee_fig_path)
         plt.close(fig_right_ee)
+
+    def compare_camera_images(self) -> None:
+        """Save replayed camera images as videos and compare with dataset videos."""
+        if len(self.replayed_camera_images["top_camera"]) == 0:
+            print("Warning: No camera images recorded during replay. Cannot compare camera videos.")
+            return
+        
+        print("\n" + "="*60)
+        print("CAMERA IMAGE COMPARISON")
+        print("="*60)
+        
+        # Video file mapping
+        video_files = {
+            "top_camera": "top_camera-images-rgb.mp4",
+            "left_camera": "left_camera-images-rgb.mp4",
+            "right_camera": "right_camera-images-rgb.mp4"
+        }
+        
+        fps = 30  # Assuming 30 fps
+        
+        # Save replayed videos and compare
+        for camera_name in ["top_camera", "left_camera", "right_camera"]:
+            if len(self.replayed_camera_images[camera_name]) == 0:
+                print(f"Skipping {camera_name}: No images captured")
+                continue
+            
+            images = self.replayed_camera_images[camera_name]
+            print(f"\nProcessing {camera_name}...")
+            print(f"  Captured {len(images)} frames")
+            
+            # Save replayed video
+            if len(images) > 0:
+                height, width, _ = images[0].shape
+                replayed_video_path = os.path.join(self.episode_dir, f"replayed_{camera_name}-images-rgb.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(replayed_video_path, fourcc, fps, (width, height))
+                for img in images:
+                    # Convert RGB to BGR for cv2.VideoWriter
+                    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    writer.write(bgr)
+                writer.release()
+                print(f"  Saved replayed video to {replayed_video_path}")
+            
+            # Load dataset video
+            dataset_video_path = os.path.join(self.episode_dir, video_files[camera_name])
+            if not os.path.exists(dataset_video_path):
+                print(f"  Warning: Dataset video {dataset_video_path} not found, skipping comparison")
+                continue
+            
+            # Load dataset video
+            dataset_cap = cv2.VideoCapture(dataset_video_path)
+            dataset_fps = dataset_cap.get(cv2.CAP_PROP_FPS)
+            dataset_width = int(dataset_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            dataset_height = int(dataset_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            # Get replayed video dimensions
+            replayed_height, replayed_width, _ = images[0].shape
+            
+            # Use the maximum height and ensure both videos are resized to same height
+            target_height = max(dataset_height, replayed_height)
+            target_width_dataset = int(dataset_width * target_height / dataset_height)
+            target_width_replayed = int(replayed_width * target_height / replayed_height)
+            
+            # Create side-by-side video (dataset on left, replayed on right)
+            side_by_side_width = target_width_dataset + target_width_replayed
+            side_by_side_path = os.path.join(self.episode_dir, f"{camera_name}_side_by_side_comparison.mp4")
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            side_by_side_writer = cv2.VideoWriter(
+                side_by_side_path, fourcc, fps, (side_by_side_width, target_height)
+            )
+            
+            # Process frames
+            frame_count = 0
+            dataset_frame_count = 0
+            replayed_frame_count = 0
+            last_dataset_frame = None
+            last_replayed_frame_bgr = None
+            dataset_frame_rgb_resized = None
+            avg_pixel_diff = 0.0
+            rmse = 0.0
+            
+            # Get first frames for statistics
+            dataset_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret_dataset, dataset_frame = dataset_cap.read()
+            dataset_frame_rgb = None
+            replayed_frame_rgb = images[0] if len(images) > 0 else None
+            
+            if ret_dataset and replayed_frame_rgb is not None:
+                dataset_frame_rgb = cv2.cvtColor(dataset_frame, cv2.COLOR_BGR2RGB)
+                # Resize to match replayed frame for comparison
+                if dataset_frame_rgb.shape != replayed_frame_rgb.shape:
+                    dataset_frame_rgb_resized = cv2.resize(
+                        dataset_frame_rgb, (replayed_frame_rgb.shape[1], replayed_frame_rgb.shape[0])
+                    )
+                else:
+                    dataset_frame_rgb_resized = dataset_frame_rgb
+                
+                # Compute pixel value differences on first frame
+                dataset_float = dataset_frame_rgb_resized.astype(np.float32)
+                replayed_float = replayed_frame_rgb.astype(np.float32)
+                
+                abs_diff = np.abs(dataset_float - replayed_float)
+                avg_pixel_diff = np.mean(abs_diff)
+                avg_pixel_diff_per_channel = np.mean(abs_diff, axis=(0, 1))
+                mse = np.mean((dataset_float - replayed_float) ** 2)
+                rmse = np.sqrt(mse)
+                max_diff = np.max(abs_diff)
+                
+                print(f"  {camera_name} first frame statistics:")
+                print(f"    Average pixel difference (MAD): {avg_pixel_diff:.2f}")
+                print(f"    Average pixel difference per channel (R, G, B): {avg_pixel_diff_per_channel}")
+                print(f"    Root Mean Squared Error (RMSE): {rmse:.2f}")
+                print(f"    Max pixel difference: {max_diff:.2f}")
+            
+            # Reset dataset video to beginning
+            dataset_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            
+            # Create side-by-side frames
+            max_frames = max(len(images), int(dataset_cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+            
+            while frame_count < max_frames:
+                # Read dataset frame
+                ret_dataset, dataset_frame = dataset_cap.read()
+                if not ret_dataset:
+                    # If dataset video ended, use last frame
+                    if last_dataset_frame is not None:
+                        dataset_frame = last_dataset_frame
+                    else:
+                        break
+                else:
+                    last_dataset_frame = dataset_frame
+                    dataset_frame_count += 1
+                
+                # Get replayed frame
+                if replayed_frame_count < len(images):
+                    replayed_frame_rgb = images[replayed_frame_count]
+                    replayed_frame_bgr = cv2.cvtColor(replayed_frame_rgb, cv2.COLOR_RGB2BGR)
+                    last_replayed_frame_bgr = replayed_frame_bgr
+                    replayed_frame_count += 1
+                else:
+                    # If replayed video ended, use last frame
+                    if last_replayed_frame_bgr is not None:
+                        replayed_frame_bgr = last_replayed_frame_bgr
+                    else:
+                        break
+                
+                # Resize both frames to same height
+                dataset_frame_resized = cv2.resize(dataset_frame, (target_width_dataset, target_height))
+                replayed_frame_resized = cv2.resize(replayed_frame_bgr, (target_width_replayed, target_height))
+                
+                # Create side-by-side frame
+                side_by_side_frame = np.hstack([dataset_frame_resized, replayed_frame_resized])
+                
+                # Add text labels
+                cv2.putText(
+                    side_by_side_frame, "Dataset", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+                )
+                cv2.putText(
+                    side_by_side_frame, "Replayed", (target_width_dataset + 10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+                )
+                
+                side_by_side_writer.write(side_by_side_frame)
+                frame_count += 1
+            
+            dataset_cap.release()
+            side_by_side_writer.release()
+            print(f"  Saved side-by-side comparison video to {side_by_side_path}")
+            
+            # Create comparison plot for first frame
+            if dataset_frame_rgb_resized is not None and replayed_frame_rgb is not None:
+                overlay = (dataset_frame_rgb_resized.astype(np.float32) * 0.5 + replayed_frame_rgb.astype(np.float32) * 0.5).astype(np.uint8)
+                
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                
+                axes[0].imshow(dataset_frame_rgb_resized)
+                axes[0].set_title(f"{camera_name.replace('_', ' ').title()} - Dataset")
+                axes[0].axis('off')
+                
+                axes[1].imshow(replayed_frame_rgb)
+                axes[1].set_title(f"{camera_name.replace('_', ' ').title()} - Replayed")
+                axes[1].axis('off')
+                
+                axes[2].imshow(overlay)
+                title = f"{camera_name.replace('_', ' ').title()} - Overlay\nAvg Diff: {avg_pixel_diff:.1f}, RMSE: {rmse:.1f}"
+                axes[2].set_title(title)
+                axes[2].axis('off')
+                
+                plt.tight_layout()
+                comparison_path = os.path.join(self.episode_dir, f"{camera_name}_comparison.png")
+                plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
+                print(f"  Saved comparison plot to {comparison_path}")
+                plt.close()
+        
+        print("="*60 + "\n")
 
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:

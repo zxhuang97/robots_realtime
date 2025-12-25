@@ -33,8 +33,9 @@ gripper_index: 6
 # gripper_limits: [0.0, -2.4] # a smaller opening, full opening is -2.7
 
 # i2rt default values
-kp: [80, 80, 80, 30, 10, 10, 20]
+kp: [80, 80, 80, 40, 10, 10, 20]
 kd: [5, 5, 5, 1.5, 1.5, 1.5, 0.5]
+
 joint_limits:
   - [-2.767, 3.28]
   - [-0.15, 3.80]

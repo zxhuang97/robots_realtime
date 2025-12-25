@@ -1,25 +1,25 @@
 _target_: robots_realtime.envs.launch.LaunchConfig
 
-# sensors:
-#   cameras:
-#     top_camera:
-#       _target_: robots_realtime.sensors.cameras.camera.CameraNode
-#       camera:
-#         _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
-#         device_path: "/dev/video4"   # Intel RealSense on usb-0000:00:14.0-1
-#         camera_type: "realsense_camera"
-#     right_camera:
-#       _target_: robots_realtime.sensors.cameras.camera.CameraNode
-#       camera:
-#         _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
-#         device_path: "/dev/video16"  # Intel RealSense on usb-0000:00:14.0-10
-#         camera_type: "realsense_camera"
-#     left_camera:
-#       _target_: robots_realtime.sensors.cameras.camera.CameraNode
-#       camera:
-#         _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
-#         device_path: "/dev/video10"  # Intel RealSense on usb-0000:00:14.0-2
-#         camera_type: "realsense_camera"
+sensors:
+  cameras:
+    top_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322274714"
+        name: "top_camera"
+    right_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322277156"
+        name: "right_camera"
+    left_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322271210"
+        name: "left_camera"
 
 robots:
   left: ["robot_configs/yam/left.yaml"]
