@@ -223,39 +223,31 @@ class ReplayAgent(Agent):
         print(f"\nLeft Arm Joint Position Errors:")
         print(f"  Mean error: {np.mean(left_joint_error):.6f}")
         print(f"  Max error: {np.max(left_joint_error):.6f}")
-        print(f"  RMS error: {np.sqrt(np.mean(left_joint_error**2)):.6f}")
         print(f"\nRight Arm Joint Position Errors:")
         print(f"  Mean error: {np.mean(right_joint_error):.6f}")
         print(f"  Max error: {np.max(right_joint_error):.6f}")
-        print(f"  RMS error: {np.sqrt(np.mean(right_joint_error**2)):.6f}")
         
         if left_ee_pos_error is not None and left_ee_ori_error is not None and right_ee_pos_error is not None and right_ee_ori_error is not None:
             print(f"\nLeft Arm End Effector Position Errors:")
             print(f"  Mean error: {np.mean(left_ee_pos_error):.6f} m")
             print(f"  Max error: {np.max(left_ee_pos_error):.6f} m")
-            print(f"  RMS error: {np.sqrt(np.mean(left_ee_pos_error**2)):.6f} m")
             print(f"\nLeft Arm End Effector Orientation Errors:")
             print(f"  Mean error: {np.mean(left_ee_ori_error):.6f} rad ({np.degrees(np.mean(left_ee_ori_error)):.4f} deg)")
             print(f"  Max error: {np.max(left_ee_ori_error):.6f} rad ({np.degrees(np.max(left_ee_ori_error)):.4f} deg)")
-            print(f"  RMS error: {np.sqrt(np.mean(left_ee_ori_error**2)):.6f} rad ({np.degrees(np.sqrt(np.mean(left_ee_ori_error**2))):.4f} deg)")
             
             print(f"\nRight Arm End Effector Position Errors:")
             print(f"  Mean error: {np.mean(right_ee_pos_error):.6f} m")
             print(f"  Max error: {np.max(right_ee_pos_error):.6f} m")
-            print(f"  RMS error: {np.sqrt(np.mean(right_ee_pos_error**2)):.6f} m")
             print(f"\nRight Arm End Effector Orientation Errors:")
             print(f"  Mean error: {np.mean(right_ee_ori_error):.6f} rad ({np.degrees(np.mean(right_ee_ori_error)):.4f} deg)")
             print(f"  Max error: {np.max(right_ee_ori_error):.6f} rad ({np.degrees(np.max(right_ee_ori_error)):.4f} deg)")
-            print(f"  RMS error: {np.sqrt(np.mean(right_ee_ori_error**2)):.6f} rad ({np.degrees(np.sqrt(np.mean(right_ee_ori_error**2))):.4f} deg)")
         
         print(f"\nLeft Gripper Position Errors:")
         print(f"  Mean error: {np.mean(left_gripper_error):.6f}")
         print(f"  Max error: {np.max(left_gripper_error):.6f}")
-        print(f"  RMS error: {np.sqrt(np.mean(left_gripper_error**2)):.6f}")
         print(f"\nRight Gripper Position Errors:")
         print(f"  Mean error: {np.mean(right_gripper_error):.6f}")
         print(f"  Max error: {np.max(right_gripper_error):.6f}")
-        print(f"  RMS error: {np.sqrt(np.mean(right_gripper_error**2)):.6f}")
         print("="*60 + "\n")
 
         # Plot joint trajectories: one figure per arm, 2x4 grid (6 joints + 1 gripper = 7 subplots)
@@ -415,12 +407,26 @@ class ReplayAgent(Agent):
         ax.grid(True, linestyle=":")
         ax.legend()
         
+        # Add error statistics text for position error
+        mean_err = np.mean(left_ee_pos_error)
+        max_err = np.max(left_ee_pos_error)
+        ax.text(0.98, 0.98, f"Mean: {mean_err:.6f} m\nMax: {max_err:.6f} m", 
+               transform=ax.transAxes, fontsize=9, verticalalignment='top',
+               horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
         # Orientation error plot
         ax = axes_left_ee[1, 1]
         ax.plot(timesteps, np.degrees(left_ee_ori_error), label="Orientation Error", color='red')
         ax.set_ylabel("Orientation Error (deg)")
         ax.grid(True, linestyle=":")
         ax.legend()
+        
+        # Add error statistics text for orientation error
+        mean_err = np.mean(left_ee_ori_error)
+        max_err = np.max(left_ee_ori_error)
+        ax.text(0.98, 0.98, f"Mean: {np.degrees(mean_err):.4f} deg\nMax: {np.degrees(max_err):.4f} deg", 
+               transform=ax.transAxes, fontsize=9, verticalalignment='top',
+               horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         # Hide unused subplot
         axes_left_ee[2, 1].axis('off')
@@ -454,12 +460,26 @@ class ReplayAgent(Agent):
         ax.grid(True, linestyle=":")
         ax.legend()
         
+        # Add error statistics text for position error
+        mean_err = np.mean(right_ee_pos_error)
+        max_err = np.max(right_ee_pos_error)
+        ax.text(0.98, 0.98, f"Mean: {mean_err:.6f} m\nMax: {max_err:.6f} m", 
+               transform=ax.transAxes, fontsize=9, verticalalignment='top',
+               horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
         # Orientation error plot
         ax = axes_right_ee[1, 1]
         ax.plot(timesteps, np.degrees(right_ee_ori_error), label="Orientation Error", color='red')
         ax.set_ylabel("Orientation Error (deg)")
         ax.grid(True, linestyle=":")
         ax.legend()
+        
+        # Add error statistics text for orientation error
+        mean_err = np.mean(right_ee_ori_error)
+        max_err = np.max(right_ee_ori_error)
+        ax.text(0.98, 0.98, f"Mean: {np.degrees(mean_err):.4f} deg\nMax: {np.degrees(max_err):.4f} deg", 
+               transform=ax.transAxes, fontsize=9, verticalalignment='top',
+               horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         # Hide unused subplot
         axes_right_ee[2, 1].axis('off')

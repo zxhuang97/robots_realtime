@@ -199,13 +199,27 @@ class DummyCamera(CameraDriver):
 
 
 if __name__ == "__main__":
+    # Example using OpencvCamera
     cfg = """
     top_camera:
         _target_: robots_realtime.sensors.cameras.camera.CameraNode
         camera:
             _target_: robots_realtime.sensors.cameras.opencv_camera.OpencvCamera
-            device_path: "/dev/video8"
+            device_path: "/dev/video10"
             camera_type: "realsense_camera"
+    """
+    
+    # Example using RealSenseCamera (recommended for RealSense cameras)
+    cfg = """
+    top_camera:
+        _target_: robots_realtime.sensors.cameras.camera.CameraNode
+        camera:
+            _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+            serial_number: "230322274714"
+            camera_type: "realsense_camera"
+            resolution: [640, 480]
+            fps: 30
+            name: "top_camera"
     """
     import yaml
     import cv2
@@ -222,16 +236,21 @@ if __name__ == "__main__":
         clients.append(client)
 
     images = []
+
+    fps = 30  # match sleep interval above
     for i in tqdm(range(100)):
+        t1=time.time()
         dats = [c.read() for c in clients]
+        t2=time.time()
+        print(f"time taken to read data: {t2-t1}")
         frame = dats[0]["images"]["rgb"]
-        print(f"data: {frame.shape}")
         images.append(frame)
-        time.sleep(0.1)
+        time_to_sleep = 1.0 / fps - (t2-t1)
+        if time_to_sleep > 0:
+            time.sleep(time_to_sleep)
 
     if len(images) > 0:
         height, width, _ = images[0].shape
-        fps = 1.0 / 0.1  # match sleep interval above
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out_path = "camera_test.mp4"
         writer = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
@@ -240,6 +259,13 @@ if __name__ == "__main__":
             writer.write(bgr)
         writer.release()
         print(f"Saved video to {out_path}")
+        
+        # Save final frame as image
+        final_image = images[-1]
+        bgr_image = cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR)
+        image_path = "camera_test.png"
+        cv2.imwrite(image_path, bgr_image)
+        print(f"Saved image to {image_path}")
 
     for c in clients:
         c.close()

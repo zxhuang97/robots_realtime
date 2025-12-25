@@ -36,7 +36,7 @@ class OpencvCamera(CameraDriver):
         if not self.cap.isOpened():
             logging.error(f"Failed to open camera at {self.device_path}")
             raise RuntimeError(f"Failed to open camera at {self.device_path}")
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        # self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
 
@@ -94,7 +94,7 @@ class OpencvCamera(CameraDriver):
 if __name__ == "__main__":
     import argparse
 
-    from yam_realtime.camera.camera_utils import plot_camera_read
+    from robots_realtime.sensors.cameras.camera_utils import plot_camera_read
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_path", type=str, default="/dev/video-zed2i")
