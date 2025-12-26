@@ -27,7 +27,7 @@ robots:
 
 agent:
   _target_: robots_realtime.agents.replay_agent.ReplayAgent
-  episode_dir: "../xdof_epi/handoff_1/" # REPLACE THIS with your actual episode path
+  episode_dir: "../xdof_epi/handoff_2/" # REPLACE THIS with your actual episode path
   loop: false
 
 station_metadata:

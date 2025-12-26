@@ -6,6 +6,7 @@ import cv2
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend to avoid GUI warnings
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 from dm_env.specs import Array
 
@@ -424,13 +425,8 @@ class ReplayAgent(Agent):
             if not os.path.exists(dataset_video_path):
                 continue
             
-            stats = self._compute_camera_statistics(images, dataset_video_path)
-            if stats:
-                self._print_camera_statistics(camera_name, stats)
-            
             self._create_side_by_side_video(camera_name, images, dataset_video_path)
-            if stats:
-                self._create_camera_comparison_plot(camera_name, stats)
+            self._create_camera_comparison_plot(camera_name, images, dataset_video_path)
         
         print("="*60 + "\n")
 
@@ -510,30 +506,71 @@ class ReplayAgent(Agent):
         writer.release()
         print(f"  Saved {camera_name} comparison video ({max_frames} frames)")
 
-    def _create_camera_comparison_plot(self, camera_name: str, stats: Dict[str, Any]) -> None:
-        """Create comparison plot for first frame."""
-        overlay = (stats["dataset_frame_rgb"].astype(np.float32) * 0.5 + 
-                  stats["replayed_frame_rgb"].astype(np.float32) * 0.5).astype(np.uint8)
+    def _create_camera_comparison_plot(self, camera_name: str, images: list, dataset_video_path: str) -> None:
+        """Create comparison plot for first frame (dataset vs replayed with overlay)."""
+        cap = cv2.VideoCapture(dataset_video_path)
+        ret, dataset_frame = cap.read()
+        cap.release()
         
+        if not ret or len(images) == 0:
+            return
+        
+        # Convert dataset frame from BGR to RGB
+        dataset_img_rgb = cv2.cvtColor(dataset_frame, cv2.COLOR_BGR2RGB)
+        replayed_img_rgb = images[0]
+        
+        # Resize if shapes don't match
+        if dataset_img_rgb.shape != replayed_img_rgb.shape:
+            dataset_img_rgb = cv2.resize(dataset_img_rgb, (replayed_img_rgb.shape[1], replayed_img_rgb.shape[0]))
+        
+        # Create color masks: blue for dataset, red for replayed
+        dataset_float = dataset_img_rgb.astype(np.float32)
+        replayed_float = replayed_img_rgb.astype(np.float32)
+        
+        # Add blue tint to dataset (boost blue channel, reduce red/green)
+        dataset_tinted = dataset_float.copy()
+        dataset_tinted[:, :, 2] = np.clip(dataset_tinted[:, :, 2] * 1.3, 0, 255)  # Boost blue
+        dataset_tinted[:, :, 0] = np.clip(dataset_tinted[:, :, 0] * 0.8, 0, 255)  # Reduce red
+        dataset_tinted[:, :, 1] = np.clip(dataset_tinted[:, :, 1] * 0.8, 0, 255)  # Reduce green
+        
+        # Add red tint to replayed (boost red channel, reduce green/blue)
+        replayed_tinted = replayed_float.copy()
+        replayed_tinted[:, :, 0] = np.clip(replayed_tinted[:, :, 0] * 1.3, 0, 255)  # Boost red
+        replayed_tinted[:, :, 1] = np.clip(replayed_tinted[:, :, 1] * 0.8, 0, 255)  # Reduce green
+        replayed_tinted[:, :, 2] = np.clip(replayed_tinted[:, :, 2] * 0.8, 0, 255)  # Reduce blue
+        
+        # Create overlay (50% blend with color tints)
+        overlay = (dataset_tinted * 0.5 + replayed_tinted * 0.5).astype(np.uint8)
+        
+        # Create figure with 3 subplots
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         camera_title = camera_name.replace('_', ' ').title()
         
-        axes[0].imshow(stats["dataset_frame_rgb"])
+        axes[0].imshow(dataset_img_rgb)
         axes[0].set_title(f"{camera_title} - Dataset")
         axes[0].axis('off')
         
-        axes[1].imshow(stats["replayed_frame_rgb"])
+        axes[1].imshow(replayed_img_rgb)
         axes[1].set_title(f"{camera_title} - Replayed")
         axes[1].axis('off')
         
         axes[2].imshow(overlay)
-        axes[2].set_title(f"{camera_title} - Overlay\nAvg Diff: {stats['avg_pixel_diff']:.1f}, RMSE: {stats['rmse']:.1f}")
+        axes[2].set_title(f"{camera_title} - Overlay")
         axes[2].axis('off')
+        
+        # Add legend to overlay plot
+        legend_elements = [
+            Patch(facecolor='blue', alpha=0.6, label='Dataset'),
+            Patch(facecolor='red', alpha=0.6, label='Replayed')
+        ]
+        axes[2].legend(handles=legend_elements, loc='upper right', framealpha=0.9)
         
         plt.tight_layout()
         comparison_path = os.path.join(self.episode_dir, f"{camera_name}_comparison.png")
         plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
+        print(f"  Saved {camera_name} comparison plot")
         plt.close()
+
 
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:

@@ -1,0 +1,39 @@
+_target_: robots_realtime.envs.launch.LaunchConfig
+
+sensors:
+  cameras:
+    top_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.zed_camera.ZedCamera
+        resolution: "HD720"
+        fps: 30
+        device_id: "35062621"
+        enable_depth: true
+    left_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322271210"
+        resolution: [640, 480]
+        fps: 30
+
+robots:
+  left: ["robot_configs/franka/franka_default_panda_gripper.yaml"]
+
+agent:
+  _target_: robots_realtime.agents.policy_learning.molmoact_agent.MolmoActAgent
+  checkpoint: "checkpoints/handoff_24000/"
+  task_description: "manipulate objects"
+  unnorm_key: "xdof_data"
+  main_camera: "top_camera"
+  wrist_camera: "left_camera"
+  action_chunk: 8
+  debug: false
+
+station_metadata:
+  world_frame: "base"
+  station_layout_version: "0.1.0"
+  arm_type: "franka"
+  gripper_version: "0.1.0"
+
