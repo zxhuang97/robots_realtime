@@ -182,10 +182,21 @@ class DatasetObservationEnv(RobotEnv):
         
         Args:
             reset_pos: Optional reset position dictionary mapping robot names to dicts with 'arm_pos' and 'gripper_pos' keys.
-                      If None, uses self._reset_pos if configured.
+                      If None, uses the first action from the dataset (similar to ReplayAgent).
         """
         self._dataset_step = 0
-        obs =  super().reset(reset_pos, duration)
+        
+        # If reset_pos is None, use first action from dataset
+        if reset_pos is None and self._dataset_data is not None:
+            reset_pos = {}
+            for robot_name in self._robot_dict.keys():
+                actions = self._dataset_data["gt_actions"][robot_name]
+                reset_pos[robot_name] = {
+                    "arm_pos": actions[0, :6],
+                    "gripper_pos": actions[0, 6]
+                }
+        
+        obs = super().reset(reset_pos, duration)
         return obs
     
     def _get_obs_for_movement(self) -> Dict[str, Any]:

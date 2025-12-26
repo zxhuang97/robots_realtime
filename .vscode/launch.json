@@ -36,7 +36,23 @@
             },
             "python": "${workspaceFolder}/.venv/bin/python"
         },
-
+        {
+            "name": "Debug: yam_molmoact_bimanual",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "robots_realtime.envs.launch",
+            "args": [
+                "--config_path",
+                "configs/yam_molmoact_bimanual.yaml"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "LOCAL_AGENT_DEBUG": "1"
+            },
+            "python": "${workspaceFolder}/.venv/bin/python"
+        },
     ]
 }
 

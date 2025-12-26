@@ -1,10 +1,11 @@
 import os
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import re
 import torch
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForImageTextToText
@@ -14,47 +15,12 @@ from robots_realtime.agents.agent import PolicyAgent
 from robots_realtime.agents.constants import ActionSpec
 from robots_realtime.utils.portal_utils import remote
 
+import sys
+sys.path.append("FAR_molmoact")
+from olmo.transforms import Normalizer
+from einops import rearrange
+
 torch.set_float32_matmul_precision('high')
-
-
-def convert_to_hf(
-    checkpoint_dir: str,
-    output_dir: str,
-    style: str = "demo",
-    chat_template: str = "demo",
-    norm_stats_path: Optional[str] = None,
-    dry_run: bool = False,
-) -> bool:
-    """Convert MolmoAct checkpoint to HuggingFace format."""
-    cmd = [
-        "python3",
-        "-m",
-        "olmo.hf_model.molmoact.convert_molmoact_to_hf",
-        "--checkpoint_dir",
-        checkpoint_dir,
-        "--output_dir",
-        output_dir,
-        "--style",
-        style,
-        "--chat_template",
-        chat_template,
-    ]
-    
-    if norm_stats_path:
-        cmd.extend(["--norm_stats_path", norm_stats_path])
-    
-    print(f"Converting checkpoint to HuggingFace format...")
-    print(f"  Input:  {checkpoint_dir}")
-    print(f"  Output: {output_dir}")
-    
-    if dry_run:
-        print(f"[DRY RUN] Command to execute:")
-        print(" ".join(cmd))
-        return True
-    
-    result = subprocess.run(cmd)
-    return result.returncode == 0
-
 
 def compute_action_optimized(model, full_hidden_states, inputs, state_tensor):
     """Reuse hidden states from buffer to compute actions."""
@@ -82,13 +48,60 @@ def compute_action_optimized(model, full_hidden_states, inputs, state_tensor):
             
     return predicted_actions
 
+def parse_flow_tokens_from_text(text: str, expected_length: Optional[int] = 15, num_views: int = 2, enforce_format=False) -> Optional[List[int]]:
+    """Parse flow tokens from model output text.
 
-def prepare_inputs(img, wrist_img, language_instruction, processor, device):
+    Handles format:
+        - Tagged: "<FLOW_START><FLOW_12><FLOW_345>...<FLOW_END>"
+        - Interleaved: Multiple "<FLOW_START>...<FLOW_END>" blocks (concatenates tokens from all blocks).
+
+    Args:
+        text: Text to parse.
+        expected_length: Expected total length of flow tokens.
+                         If provided, used for padding/truncation.
+        num_views: Number of views expected. Used to infer block length for interleaved parsing.
+
+    Returns:
+        List of token IDs, or default tokens if parsing fails and expected_length provided.
+    """
+    # Extract the flow portion if it's in a longer text
+    # Use findall to support interleaved mode (multiple START/END blocks)
+    flow_matches = re.findall(r'<FLOW_START>.*?<FLOW_END>', text)
+
+    if not flow_matches:
+        num_valid_blocks = 0
+        flow_matches = []
+    else:
+        num_valid_blocks = len(flow_matches)
+    if enforce_format:
+        for _ in range(num_views - num_valid_blocks):
+            flow_matches.append("<FLOW_START>" + "<FLOW_0>" * expected_length + "<FLOW_END>")
+    all_tokens = []
+
+    def parse_block(s):
+        s = s.replace("<FLOW_START>", "").replace("<FLOW_END>", "")
+        s = s.replace("<FLOW_", "")
+        pieces = [p for p in s.split(">") if p.strip() != ""]
+        tokens = []
+        try:
+            tokens = [int(p) for p in pieces]
+        except ValueError:
+            pass
+        return tokens
+
+    for s in flow_matches:
+        block_tokens = parse_block(s)
+        if enforce_format:
+            if len(block_tokens) < expected_length:
+                block_tokens.extend([0] * (expected_length - len(block_tokens)))
+            elif len(block_tokens) > expected_length:
+                block_tokens = block_tokens[:expected_length]
+        all_tokens.extend(block_tokens)
+    return all_tokens
+
+def prepare_inputs(imgs, language_instruction, processor, device):
     """Prepare inputs for the model."""
-    image = Image.fromarray(img)
-    wrist = Image.fromarray(wrist_img)
-    imgs = [image, wrist]
-
+    imgs = [Image.fromarray(img) for img in imgs]
     prompt = (
         f"The task is {language_instruction}. What is the future motion of the image?" 
     )
@@ -113,8 +126,12 @@ def prepare_inputs(img, wrist_img, language_instruction, processor, device):
     return {k: v.to(device) for k, v in inputs.items()}
 
 
-def generate_and_predict_optimized(model, inputs, processor, state, unnorm_key, debug=False):
-    """Generate tokens and predict actions using optimized path."""
+def generate_and_predict_optimized(model, inputs, processor, state, debug=False):
+    """Generate tokens and predict actions using optimized path.
+    
+    Returns:
+        Tuple of (n_actions, generated_text) if debug=True, else just n_actions
+    """
     use_action_expert = getattr(model.config, "use_action_expert", False)
     
     if use_action_expert:
@@ -137,11 +154,11 @@ def generate_and_predict_optimized(model, inputs, processor, state, unnorm_key, 
         with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
             generation_output = model.generate(
                 **inputs, 
-                max_new_tokens=48, 
+                max_new_tokens=75, 
                 output_hidden_states=False, 
                 return_dict_in_generate=True,
-                cache_implementation="static",
-                disable_compile=True
+                # cache_implementation="static",
+                # disable_compile=True
             )
             generated_ids = generation_output.sequences
     
@@ -151,28 +168,14 @@ def generate_and_predict_optimized(model, inputs, processor, state, unnorm_key, 
     if debug:
          print(f"generated text: {generated_text}")
 
-    if getattr(model.config, "use_action_expert", False):
-        state_tensor = None
-        if state is not None:
-            state_tensor = torch.from_numpy(state).float().to(model.device).unsqueeze(0)
+    state_tensor = torch.from_numpy(state).float().to(model.device).unsqueeze(0)
 
-        total_len = generated_ids.shape[1] - 1
-        full_hidden_states = model.hidden_states_buffer[:, :total_len, :]
-        
-        optimized_actions = compute_action_optimized(model, full_hidden_states, inputs, state_tensor)
-        
-        raw_actions = optimized_actions[0]
-        unnormalized_actions = model.unnormalize_action_tensor(raw_actions, unnorm_key=unnorm_key)
-        
-        action = unnormalized_actions.float().cpu().numpy()
-        if debug:
-            print(f"generated action (expert): {action}")
-    else:
-        action = model.parse_action(generated_text, unnorm_key=unnorm_key)
-        if debug:
-            print(f"generated action: {action}")
+    total_len = generated_ids.shape[1] - 1
+    full_hidden_states = model.hidden_states_buffer[:, :total_len, :]
+    
+    n_actions = compute_action_optimized(model, full_hidden_states, inputs, state_tensor)
             
-    return action
+    return n_actions, generated_text
 
 
 @dataclass
@@ -181,42 +184,18 @@ class MolmoActAgent(PolicyAgent):
     
     checkpoint: str = ""
     task_description: str = "manipulate objects"
-    unnorm_key: str = "xdof_data"
+    unnorm_key: str = "flow_tokenized"
     style: str = "demo"
     chat_template: str = "demo"
-    main_camera: str = "top_camera"
-    wrist_camera: str = "left_camera"
+    camera_names: list[str] = field(default_factory=lambda: ["top_camera", "left_camera", "right_camera"])
     debug: bool = False
     action_chunk: int = 8
     norm_stats_path: Optional[str] = None
+    motion_tokenizer_checkpoint: Optional[str] = None  # Path to motion tokenizer for flow visualization
     
     def __post_init__(self):
         """Load model and processor."""
-        super().__post_init__()
-        
-        if not self.checkpoint:
-            raise ValueError("checkpoint must be provided")
-        
         ckpt = self.checkpoint
-        
-        # Check if checkpoint needs conversion
-        if not os.path.exists(os.path.join(ckpt, "config.json")):
-            hf_ckpt = f"{ckpt.rstrip('/')}-hf"
-            if not os.path.exists(os.path.join(hf_ckpt, "config.json")):
-                print(f"Config not found in {ckpt} or {hf_ckpt}. Converting...")
-                success = convert_to_hf(
-                    checkpoint_dir=ckpt,
-                    output_dir=hf_ckpt,
-                    style=self.style,
-                    chat_template=self.chat_template,
-                    norm_stats_path=self.norm_stats_path,
-                    dry_run=False
-                )
-                if not success:
-                    raise ValueError(f"Failed to convert checkpoint {ckpt}")
-            
-            print(f"Using HF checkpoint: {hf_ckpt}")
-            ckpt = hf_ckpt
         
         self.processor = AutoProcessor.from_pretrained(
             ckpt,
@@ -234,138 +213,170 @@ class MolmoActAgent(PolicyAgent):
             attn_implementation="sdpa",
         )
         
-        # Determine unnorm_key if not in norm_stats
-        if self.unnorm_key not in self.model.norm_stats:
-            print(f"unnorm_key {self.unnorm_key} not found in model.norm_stats")
-            self.unnorm_key = list(self.model.norm_stats.keys())[0]
-            print(f"using default unnorm_key: {self.unnorm_key}")
+        self.normalizer = Normalizer(self.model.norm_stats[self.unnorm_key])
+        
+        # Load motion tokenizer for debug visualization if provided
+        self.motion_tokenizer = None
+        if self.debug and self.motion_tokenizer_checkpoint:
+            from amplify.models.motion_tokenizer import load_motion_tokenizer
+            self.motion_tokenizer, _ = load_motion_tokenizer(self.motion_tokenizer_checkpoint, frozen=True)
+            self.motion_tokenizer.eval().to(self.model.device)
+            print(f"Loaded motion tokenizer from {self.motion_tokenizer_checkpoint} for debug visualization")
     
-    def _extract_images(self, obs: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
+    def _extract_images(self, obs: Dict[str, Any]) -> list[np.ndarray]:
         """Extract main and wrist images from observations."""
-        # Try to get main camera image
-        main_img = None
-        if self.main_camera in obs and "images" in obs[self.main_camera]:
-            main_img = obs[self.main_camera]["images"].get("rgb")
-        
-        # Try to get wrist camera image
-        wrist_img = None
-        if self.wrist_camera in obs and "images" in obs[self.wrist_camera]:
-            wrist_img = obs[self.wrist_camera]["images"].get("rgb")
-        
-        # Fallback: use main camera for both if wrist not available
-        if main_img is None:
-            # Try other common camera names
-            for cam_name in ["top_camera", "left_camera", "right_camera"]:
-                if cam_name in obs and "images" in obs[cam_name]:
-                    main_img = obs[cam_name]["images"].get("rgb")
-                    if main_img is not None:
-                        break
-        
-        if wrist_img is None:
-            # Use main image as wrist image if not available
-            wrist_img = main_img
-        
-        if main_img is None or wrist_img is None:
-            raise ValueError(f"Could not extract images from observation. Available keys: {list(obs.keys())}")
-        
-        # Ensure images are uint8 numpy arrays
-        if not isinstance(main_img, np.ndarray):
-            main_img = np.array(main_img)
-        if not isinstance(wrist_img, np.ndarray):
-            wrist_img = np.array(wrist_img)
-        
-        if main_img.dtype != np.uint8:
-            main_img = (main_img * 255).astype(np.uint8) if main_img.max() <= 1.0 else main_img.astype(np.uint8)
-        if wrist_img.dtype != np.uint8:
-            wrist_img = (wrist_img * 255).astype(np.uint8) if wrist_img.max() <= 1.0 else wrist_img.astype(np.uint8)
-        
-        return main_img, wrist_img
+        images = []
+        for camera_name in self.camera_names:
+            img = obs[camera_name]["images"]["rgb"].astype(np.uint8)
+            images.append(img)
+        return images
     
-    def _extract_state(self, obs: Dict[str, Any]) -> Optional[np.ndarray]:
+    def _extract_state(self, obs: Dict[str, Any]) -> np.ndarray:
         """Extract proprioceptive state from observations."""
-        # Try to extract joint positions and gripper positions
         state_parts = []
-        
-        # Try left arm
-        if "left" in obs:
-            if "joint_pos" in obs["left"]:
-                state_parts.append(obs["left"]["joint_pos"])
-            if "gripper_pos" in obs["left"]:
-                state_parts.append(obs["left"]["gripper_pos"])
-        
-        # Try right arm
-        if "right" in obs:
-            if "joint_pos" in obs["right"]:
-                state_parts.append(obs["right"]["joint_pos"])
-            if "gripper_pos" in obs["right"]:
-                state_parts.append(obs["right"]["gripper_pos"])
-        
-        if len(state_parts) == 0:
-            return None
-        
+        state_parts.append(obs["left"]["joint_pos"])
+        state_parts.append(obs["left"]["gripper_pos"])
+        state_parts.append(obs["right"]["joint_pos"])
+        state_parts.append(obs["right"]["gripper_pos"])
         state = np.concatenate(state_parts, axis=-1)
         return state.astype(np.float32)
+    
+    def _decode_flow_tokens_to_tracks(self, tokens: list[int], n_tracks: int = 400, views: int = 3) -> Optional[np.ndarray]:
+        """Decode flow tokens to absolute point tracks.
+        
+        Args:
+            tokens: List of token IDs
+            n_tracks: Number of tracks (should be 400)
+            views: Number of views (should match number of cameras)
+            
+        Returns:
+            Point tracks as numpy array (views, frames, n_tracks, 2) in [-1, 1] or None if decoding fails
+        """
+        if self.motion_tokenizer is None:
+            return None
+        
+        if len(tokens) % self.motion_tokenizer.num_timesteps != 0:
+            return None
+        
+        from amplify.utils.kp_utils.query_utils import grid_queries
+        from amplify.utils.data_utils import velocities_to_points
+        
+        # Convert tokens to tensor and decode to velocities
+        token_tensor = torch.tensor(tokens, dtype=torch.long, device=self.model.device)
+        with torch.no_grad():
+            z_quantized = self.motion_tokenizer.quantize.indices_to_codes(token_tensor).unsqueeze(0)
+            reconstructed_flow, _ = self.motion_tokenizer.decode(z_quantized)
+            # Generate initial grid points: (views, n_tracks, 2) in [-1, 1]
+            initial_points = grid_queries(views=views, n_tracks=n_tracks, device=self.model.device).tensor
+            initial_points = initial_points.unsqueeze(0).unsqueeze(2)
+            # Convert velocities to absolute tracks
+            tracks = velocities_to_points(
+                reconstructed_flow,
+                time_dim=2,
+                init_points=initial_points
+            )
+            tracks = tracks.squeeze(0)
+        
+        return tracks.cpu().numpy()
+    
+    def _visualize_flow_tracks(self, images: list[np.ndarray], tracks: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        """Visualize flow tracks on images.
+        
+        Args:
+            images: List of input images (H, W, 3) in [0, 255]
+            tracks: Flow tracks (views, frames, n_tracks, 2) in [-1, 1] or None
+            
+        Returns:
+            Visualization image as numpy array (H, W*views, 3) in [0, 255] or None
+        """
+        if tracks is None:
+            return None
+        
+        from amplify.utils.vis_utils import vis_pred
+        
+        # Stack images: (views, H, W, 3)
+        image_stack = np.stack(images, axis=0)
+        image_tensor = torch.tensor(image_stack).float().unsqueeze(0) / 255.0
+        
+        # Visualize tracks
+        tracks_tensor = torch.from_numpy(tracks).unsqueeze(0)
+        vis = vis_pred(image_tensor, tracks_tensor)
+        vis = vis.squeeze(0).numpy()
+        
+        if vis.dtype != np.uint8:
+            vis = np.clip(vis, 0, 255).astype(np.uint8)
+        
+        return vis
     
     @remote()
     def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
         """Generate action from observation."""
         # Extract images and state
-        main_img, wrist_img = self._extract_images(obs)
+        images = self._extract_images(obs)
         state = self._extract_state(obs)
-        
+        n_state = self.normalizer.normalize(state, key="state")
         # Prepare inputs
         inputs = prepare_inputs(
-            main_img, 
-            wrist_img, 
+            images,
             self.task_description, 
             self.processor, 
             self.model.device
         )
         
         # Generate action
-        action_matrix = generate_and_predict_optimized(
+        result = generate_and_predict_optimized(
             self.model, 
             inputs, 
             self.processor, 
-            state, 
-            self.unnorm_key, 
+            n_state, 
             debug=self.debug
         )
         
-        # Handle action format
-        if isinstance(action_matrix, np.ndarray):
-            if action_matrix.ndim == 2:
-                # Action matrix: take first action_chunk actions
-                action_matrix = action_matrix[:self.action_chunk]
-            elif action_matrix.ndim == 1:
-                # Single action vector
-                action_matrix = action_matrix[np.newaxis, :]
-        
-        # Extract first action
-        if isinstance(action_matrix, (list, tuple)):
-            first_action = action_matrix[0]
+        if self.debug:
+            n_actions, generated_text = result
         else:
-            first_action = action_matrix[0] if action_matrix.ndim > 1 else action_matrix
+            n_actions = result
+            generated_text = None
         
-        # Convert to expected format
-        # Assuming action is 7D: [x, y, z, qx, qy, qz, qw, gripper] or similar
-        # For bimanual, might be 14D: [left_7d, right_7d]
-        action_dim = len(first_action) if hasattr(first_action, '__len__') else 1
+        # Parse and visualize flow tokens in debug mode
+        if self.debug and generated_text:
+            num_views = len(images)
+            expected_len = 15  # Default expected length for flow tokens
+            flow_tokens = parse_flow_tokens_from_text(
+                generated_text, 
+                expected_length=expected_len, 
+                num_views=num_views, 
+                enforce_format=False
+            )
+            
+            if flow_tokens:
+                print(f"Parsed {len(flow_tokens)} flow tokens")
+                # Decode flow tokens to tracks
+                tracks = self._decode_flow_tokens_to_tracks(flow_tokens, n_tracks=400, views=num_views)
+                if tracks is not None:
+                    # Visualize tracks on images
+                    vis_image = self._visualize_flow_tracks(images, tracks)
+                    if vis_image is not None:
+                        # Save visualization (you can modify this to display or save elsewhere)
+                        import os
+                        os.makedirs("debug_visualizations", exist_ok=True)
+                        import cv2
+                        vis_path = f"debug_visualizations/flow_vis_{int(time.time() * 1000)}.png"
+                        cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
+                        print(f"Saved flow visualization to {vis_path}")
+                else:
+                    print("Failed to decode flow tokens to tracks (motion tokenizer may not be loaded)")
+            else:
+                print("No flow tokens found in generated text")
         
-        if action_dim == 7:
-            # Single arm
-            return {
-                "left": {"pos": first_action[:7]}
-            }
-        elif action_dim == 14:
-            # Bimanual
-            return {
-                "left": {"pos": first_action[:7]},
-                "right": {"pos": first_action[7:14]}
-            }
-        else:
-            # Fallback: return as-is and let environment handle it
-            return {"action": first_action}
+        delta_action = self.normalizer.unnormalize(n_actions, key="action").cpu().numpy()
+        action = delta_action + state[None]
+        left_action = action[:7]
+        right_action = action[7:]
+        return {
+            "left": {"pos": left_action},
+            "right": {"pos": right_action},
+        }
     
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:

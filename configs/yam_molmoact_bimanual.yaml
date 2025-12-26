@@ -1,0 +1,61 @@
+_target_: robots_realtime.envs.launch.LaunchConfig
+
+sensors:
+  cameras:
+    top_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322274714"
+        name: "top_camera"
+    right_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322277156"
+        name: "right_camera"
+    left_camera:
+      _target_: robots_realtime.sensors.cameras.camera.CameraNode
+      camera:
+        _target_: robots_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+        serial_number: "230322271210"
+        name: "left_camera"
+
+robots:
+  left: ["robot_configs/yam/left.yaml"]
+  right: ["robot_configs/yam/left.yaml", "robot_configs/yam/right.yaml"]
+
+agent:
+  _target_: robots_realtime.agents.policy_learning.molmoact_agent.MolmoActAgent
+  checkpoint: "checkpoints/handoff_24000/"
+  task_description: handoff
+  action_chunk: 16
+  debug: false
+
+dataset_observation_dir: "../xdof_epi/handoff_2/" # REPLACE THIS with your actual dataset directory
+action_threshold: 0.05  # Threshold for action comparison (not used with ReplayAgent, but required)
+
+station_metadata:
+  world_frame: "left_arm" # front x, left y, up z
+  extrinsics:
+    right_arm_extrinsic:
+      position: [0.0, -0.61, 0.0]
+      rotation: [1.0, 0.0, 0.0, 0.0]
+
+reset_pos:
+  - 0
+  - 0.3973
+  - 0.5384
+  - -0.1410
+  - 0
+  - 0
+home_pos:
+  - 0
+  - -0.004
+  - 0.1593
+  - -0.7712
+  - 0.0158
+  - -0.0120
+
+max_steps: 500
+
