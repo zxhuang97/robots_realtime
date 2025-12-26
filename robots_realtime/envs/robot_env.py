@@ -9,7 +9,6 @@ from robots_realtime.robots.utils import Rate
 from robots_realtime.sensors.cameras.camera import CameraDriver
 from robots_realtime.utils.portal_utils import return_futures
 
-
 class RobotEnv(dm_env.Environment):
     # Abstract methods.
     """A environment with a dm_env.Environment interface for a robot arm setup."""
@@ -151,6 +150,17 @@ class RobotEnv(dm_env.Environment):
             return self.move_to_target_slowly(target_pos, duration=duration)
         return self.get_obs()
 
+    def _get_obs_for_movement(self) -> Dict[str, Any]:
+        """Get observation to use during movement calculations.
+        
+        Can be overridden by subclasses to return real observations even when
+        get_obs() is overridden to return dataset observations.
+        
+        Returns:
+            obs: Observation to use for movement calculations
+        """
+        return self.get_obs()
+    
     def move_to_target_slowly(self, target_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None, duration: float = 2.0) -> Dict[str, Any]:
         """Slowly move all robots to target position.
         
@@ -162,10 +172,10 @@ class RobotEnv(dm_env.Environment):
         Returns:
             obs: Observation after reaching target position
         """
-        obs = self.get_obs()
+        obs = self._get_obs_for_movement()
         
         if target_pos is None:
-            return obs
+            return self.get_obs()
         
         control_rate_hz = self._rate.rate
         assert control_rate_hz is not None, "Control rate must be set"
@@ -191,7 +201,8 @@ class RobotEnv(dm_env.Environment):
                 command_gripper_pos = target_gripper_pos * alpha + current_gripper_pos * (1 - alpha)
                 command_joint_pos = np.concatenate([command_arm_pos, command_gripper_pos])
                 action[robot_name] = {"pos": command_joint_pos}
-            self.step(action)
+            self._apply_action(action)
+            self._rate.sleep()
         return self.get_obs()
 
     def observation_spec(self):  # type: ignore

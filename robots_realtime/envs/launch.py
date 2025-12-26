@@ -16,6 +16,7 @@ from robots_realtime.agents.replay_agent import ReplayAgent
 from robots_realtime.envs.configs.instantiate import instantiate
 from robots_realtime.envs.configs.loader import DictLoader
 from robots_realtime.envs.robot_env import RobotEnv
+from robots_realtime.envs.dataset_observation_env import DatasetObservationEnv
 from robots_realtime.robots.robot import Robot
 from robots_realtime.robots.utils import Rate, Timeout
 from robots_realtime.sensors.cameras.camera import CameraDriver
@@ -40,6 +41,8 @@ class LaunchConfig:
     station_metadata: Dict[str, str] = field(default_factory=dict)
     reset_pos: Optional[List[float]] = None  # Reset position for robots (arm joints only, gripper preserved)
     home_pos: Optional[List[float]] = None  # Home position for robots (arm joints only, gripper preserved)
+    dataset_observation_dir: Optional[str] = None  # Directory containing dataset observations for inference testing (optional)
+    action_threshold: float = 0.05  # Threshold for action comparison when using dataset observations
 
 @dataclass
 class Args:
@@ -96,13 +99,26 @@ def main(args: Args) -> None:
         if main_config.home_pos is not None:
             home_pos_array = np.array(main_config.home_pos)
         
-        env = RobotEnv(
-            robot_dict=robots,
-            camera_dict=camera_dict,
-            control_rate_hz=rate,
-            reset_pos=reset_pos_array,
-            home_pos=home_pos_array,
-        )
+        # Use DatasetObservationEnv if dataset_observation_dir is provided, otherwise use RobotEnv
+        if main_config.dataset_observation_dir is not None:
+            logger.info(f"Using DatasetObservationEnv with dataset: {main_config.dataset_observation_dir}")
+            env = DatasetObservationEnv(
+                robot_dict=robots,
+                camera_dict=camera_dict,
+                control_rate_hz=rate,
+                reset_pos=reset_pos_array,
+                home_pos=home_pos_array,
+                dataset_observation_dir=main_config.dataset_observation_dir,
+                action_threshold=main_config.action_threshold,
+            )
+        else:
+            env = RobotEnv(
+                robot_dict=robots,
+                camera_dict=camera_dict,
+                control_rate_hz=rate,
+                reset_pos=reset_pos_array,
+                home_pos=home_pos_array,
+            )
 
         logger.info("Starting control loop...")
         _run_control_loop(env, agent, main_config)

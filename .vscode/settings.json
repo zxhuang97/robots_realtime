@@ -1,0 +1,13 @@
+{
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportPossiblyUnboundVariable": "warning",
+    "reportUnboundVariable": "warning"
+  },
+  "basedpyright.analysis.typeCheckingMode": "basic",
+  "basedpyright.analysis.diagnosticSeverityOverrides": {
+    "reportPossiblyUnboundVariable": "warning",
+    "reportUnboundVariable": "warning"
+  }
+}
+

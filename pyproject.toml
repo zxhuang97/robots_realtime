@@ -31,6 +31,7 @@ dependencies = [
     "pyrealsense2>=2.56.5.9235",
     "mink>=0.0.13",
     "wandb>=0.23.1",
+    "imageio[ffmpeg]>=2.37.2",
 ]
 
 [project.optional-dependencies]

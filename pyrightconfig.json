@@ -1,0 +1,6 @@
+{
+  "typeCheckingMode": "basic",
+  "reportPossiblyUnboundVariable": "warning",
+  "reportUnboundVariable": "warning"
+}
+

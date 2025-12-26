@@ -430,38 +430,6 @@ class ReplayAgent(Agent):
         
         print("="*60 + "\n")
 
-    def _compute_camera_statistics(self, images: list, dataset_video_path: str) -> Optional[Dict[str, Any]]:
-        """Compute pixel difference statistics between first frames."""
-        cap = cv2.VideoCapture(dataset_video_path)
-        ret, dataset_frame = cap.read()
-        cap.release()
-        
-        if not ret or len(images) == 0:
-            return None
-        
-        dataset_frame_rgb = cv2.cvtColor(dataset_frame, cv2.COLOR_BGR2RGB)
-        replayed_frame_rgb = images[0]
-        
-        if dataset_frame_rgb.shape != replayed_frame_rgb.shape:
-            dataset_frame_rgb = cv2.resize(dataset_frame_rgb, (replayed_frame_rgb.shape[1], replayed_frame_rgb.shape[0]))
-        
-        dataset_float = dataset_frame_rgb.astype(np.float32)
-        replayed_float = replayed_frame_rgb.astype(np.float32)
-        abs_diff = np.abs(dataset_float - replayed_float)
-        
-        return {
-            "dataset_frame_rgb": dataset_frame_rgb,
-            "replayed_frame_rgb": replayed_frame_rgb,
-            "avg_pixel_diff": np.mean(abs_diff),
-            "avg_pixel_diff_per_channel": np.mean(abs_diff, axis=(0, 1)),
-            "rmse": np.sqrt(np.mean((dataset_float - replayed_float) ** 2)),
-            "max_diff": np.max(abs_diff),
-        }
-
-    def _print_camera_statistics(self, camera_name: str, stats: Dict[str, Any]) -> None:
-        """Print camera comparison statistics."""
-        print(f"  {camera_name}: MAD={stats['avg_pixel_diff']:.1f}, RMSE={stats['rmse']:.1f}, Max={stats['max_diff']:.1f}")
-
     def _create_side_by_side_video(self, camera_name: str, images: list, dataset_video_path: str) -> None:
         """Create side-by-side comparison video."""
         fps = 30
