@@ -17,7 +17,7 @@ from robots_realtime.utils.portal_utils import remote
 
 import sys
 sys.path.append("FAR_molmoact")
-from olmo.transforms import Normalizer
+from olmo.transforms import Normalizer, make_bool_mask, AbsoluteActions
 from einops import rearrange
 
 torch.set_float32_matmul_precision('high')
@@ -48,7 +48,7 @@ def compute_action_optimized(model, full_hidden_states, inputs, state_tensor):
             
     return predicted_actions
 
-def parse_flow_tokens_from_text(text: str, expected_length: Optional[int] = 15, num_views: int = 2, enforce_format=False) -> Optional[List[int]]:
+def parse_flow_tokens_from_text(text: str, expected_length: int = 15, num_views: int = 2, enforce_format=False) -> Optional[list[int]]:
     """Parse flow tokens from model output text.
 
     Handles format:
@@ -150,6 +150,7 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
             model.register_buffer("hidden_states_buffer", new_buffer, persistent=False)
     
     generated_ids = None
+    t1 = time.time()
     with torch.inference_mode():
         with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
             generation_output = model.generate(
@@ -158,10 +159,11 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
                 output_hidden_states=False, 
                 return_dict_in_generate=True,
                 # cache_implementation="static",
-                # disable_compile=True
+                disable_compile=True
             )
             generated_ids = generation_output.sequences
-    
+    t2 = time.time()
+    print(f"[generation] time: {t2 - t1} seconds")
     generated_tokens = generated_ids[:, inputs['input_ids'].size(1):]
     generated_text = processor.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     
@@ -174,7 +176,6 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
     full_hidden_states = model.hidden_states_buffer[:, :total_len, :]
     
     n_actions = compute_action_optimized(model, full_hidden_states, inputs, state_tensor)
-            
     return n_actions, generated_text
 
 
@@ -215,6 +216,8 @@ class MolmoActAgent(PolicyAgent):
         
         self.normalizer = Normalizer(self.model.norm_stats[self.unnorm_key])
         
+        delta_action_mask = make_bool_mask(6, -1, 6, -1)
+        self.absolute_action_transform = AbsoluteActions(mask=delta_action_mask)
         # Load motion tokenizer for debug visualization if provided
         self.motion_tokenizer = None
         if self.debug and self.motion_tokenizer_checkpoint:
@@ -331,13 +334,8 @@ class MolmoActAgent(PolicyAgent):
             n_state, 
             debug=self.debug
         )
-        
-        if self.debug:
-            n_actions, generated_text = result
-        else:
-            n_actions = result
-            generated_text = None
-        
+        n_actions, generated_text = result
+        n_actions = n_actions.float().cpu().numpy()[0]
         # Parse and visualize flow tokens in debug mode
         if self.debug and generated_text:
             num_views = len(images)
@@ -369,14 +367,18 @@ class MolmoActAgent(PolicyAgent):
             else:
                 print("No flow tokens found in generated text")
         
-        delta_action = self.normalizer.unnormalize(n_actions, key="action").cpu().numpy()
-        action = delta_action + state[None]
-        left_action = action[:7]
-        right_action = action[7:]
-        return {
-            "left": {"pos": left_action},
-            "right": {"pos": right_action},
-        }
+        delta_action = self.normalizer.unnormalize(n_actions, key="action")
+        action = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
+        left_action = action[:, :7]
+        right_action = action[:, 7:]
+        actions_list = []
+        for i in range(len(left_action)):
+            actions_list.append({
+                "left": {"pos": left_action[i]},
+                "right": {"pos": right_action[i]},
+            })
+        return actions_list
+
     
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:

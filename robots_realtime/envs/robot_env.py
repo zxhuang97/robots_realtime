@@ -91,10 +91,15 @@ class RobotEnv(dm_env.Environment):
         Returns:
             obs: observation from the environment.
         """
+        t1 = time.time()
         if len(action) != 0:
             # get action at time t
             self._apply_action(action)
-        self._rate.sleep()  # sleep until next timestep
+        t2 = time.time()
+        if metadata["stric_rate"]:
+            self._rate.sleep()  # sleep until next timestep
+        else:
+            time.sleep(self._rate.dt - (t2 - t1))
         # return observation at time t+1
         return self.get_obs()
 

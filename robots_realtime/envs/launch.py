@@ -154,9 +154,18 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
     # Main control loop
     while True:
         action = agent.act(obs)
-        obs = env.step(action)
+        if isinstance(action, dict):
+            obs = env.step(action)
+            steps += 1
+        elif isinstance(action, list):
 
-        steps += 1
+            print("action length: ", len(action))
+            t1 = time.time()
+            for i, a in enumerate(action):
+                obs = env.step(a)
+                steps += 1
+            t2 = time.time()
+            print("Execution chunk of length ", len(action), " took ", t2 - t1, " seconds")
         loop_count += 1
 
         elapsed_time = time.time() - start_time

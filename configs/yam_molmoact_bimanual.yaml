@@ -33,8 +33,8 @@ agent:
   debug: false
 
 dataset_observation_dir: "../xdof_epi/handoff_2/" # REPLACE THIS with your actual dataset directory
-action_threshold: 0.05  # Threshold for action comparison (not used with ReplayAgent, but required)
-
+action_threshold: 1 # Threshold for action comparison (not used with ReplayAgent, but required)
+hz: 5
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
   extrinsics:
