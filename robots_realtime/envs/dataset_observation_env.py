@@ -123,6 +123,22 @@ class DatasetObservationEnv(RobotEnv):
                 frame_rgb = self._dataset_data["video_frames"][camera_name][self._dataset_step]
                 observations[camera_name] = {"images": {"rgb": frame_rgb}}
         
+        # Get GT action chunks for next 16 steps
+        action_chunk_size = 16
+        action_chunks = []
+        for robot_name in self._robot_dict.keys():
+            actions = self._dataset_data["gt_actions"][robot_name]
+            start_idx = self._dataset_step
+            end_idx = min(start_idx + action_chunk_size, len(actions))
+
+            action_chunk = actions[start_idx:end_idx].copy()
+            if len(action_chunk) < action_chunk_size:
+                last_action = actions[-1] if len(actions) > 0 else np.zeros(actions.shape[1])
+                padding = np.tile(last_action[None, :], (action_chunk_size - len(action_chunk), 1))
+                action_chunk = np.concatenate([action_chunk, padding], axis=0)
+            action_chunks.append(action_chunk)
+        
+        observations["gt_action_chunks"] = np.concatenate(action_chunks, axis=-1)
         observations["timestamp_end"] = time.time()
         return observations
     

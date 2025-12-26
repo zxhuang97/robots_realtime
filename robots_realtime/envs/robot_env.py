@@ -73,6 +73,7 @@ class RobotEnv(dm_env.Environment):
         return 0
 
     def _apply_action(self, action_dict: Dict[str, Any]) -> None:
+        return
         with return_futures(*self._robot_dict.values()):  # type: ignore
             for name, action in action_dict.items():
                 if name == "base":
@@ -96,7 +97,7 @@ class RobotEnv(dm_env.Environment):
             # get action at time t
             self._apply_action(action)
         t2 = time.time()
-        if metadata["stric_rate"]:
+        if metadata["strict_rate"]:
             self._rate.sleep()  # sleep until next timestep
         else:
             time.sleep(self._rate.dt - (t2 - t1))

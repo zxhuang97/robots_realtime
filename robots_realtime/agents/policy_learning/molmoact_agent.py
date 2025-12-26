@@ -14,10 +14,11 @@ from dm_env.specs import Array
 from robots_realtime.agents.agent import PolicyAgent
 from robots_realtime.agents.constants import ActionSpec
 from robots_realtime.utils.portal_utils import remote
-
+import torch.nn.functional as F
+import cv2
 import sys
 sys.path.append("FAR_molmoact")
-from olmo.transforms import Normalizer, make_bool_mask, AbsoluteActions
+from olmo.transforms import Normalizer, make_bool_mask, AbsoluteActions, DeltaActions
 from einops import rearrange
 
 torch.set_float32_matmul_precision('high')
@@ -193,6 +194,8 @@ class MolmoActAgent(PolicyAgent):
     action_chunk: int = 8
     norm_stats_path: Optional[str] = None
     motion_tokenizer_checkpoint: Optional[str] = None  # Path to motion tokenizer for flow visualization
+    train_shape: Tuple[int, int] = (224, 168)
+    resize_to_train_shape: bool = True
     
     def __post_init__(self):
         """Load model and processor."""
@@ -211,13 +214,16 @@ class MolmoActAgent(PolicyAgent):
             trust_remote_code=True,
             torch_dtype="bfloat16",
             device_map="auto",
-            attn_implementation="sdpa",
+            # attn_implementation="sdpa",
         )
         
         self.normalizer = Normalizer(self.model.norm_stats[self.unnorm_key])
         
         delta_action_mask = make_bool_mask(6, -1, 6, -1)
         self.absolute_action_transform = AbsoluteActions(mask=delta_action_mask)
+        self.delta_action_transform = DeltaActions(mask=delta_action_mask)
+
+        self.l1_action_loss = []
         # Load motion tokenizer for debug visualization if provided
         self.motion_tokenizer = None
         if self.debug and self.motion_tokenizer_checkpoint:
@@ -231,6 +237,8 @@ class MolmoActAgent(PolicyAgent):
         images = []
         for camera_name in self.camera_names:
             img = obs[camera_name]["images"]["rgb"].astype(np.uint8)
+            if self.resize_to_train_shape:
+                img = cv2.resize(img, self.train_shape, interpolation=cv2.INTER_LINEAR)
             images.append(img)
         return images
     
@@ -337,37 +345,42 @@ class MolmoActAgent(PolicyAgent):
         n_actions, generated_text = result
         n_actions = n_actions.float().cpu().numpy()[0]
         # Parse and visualize flow tokens in debug mode
-        if self.debug and generated_text:
-            num_views = len(images)
-            expected_len = 15  # Default expected length for flow tokens
-            flow_tokens = parse_flow_tokens_from_text(
-                generated_text, 
-                expected_length=expected_len, 
-                num_views=num_views, 
-                enforce_format=False
-            )
+        # if self.debug and generated_text:
+        #     num_views = len(images)
+        #     expected_len = 15  # Default expected length for flow tokens
+        #     flow_tokens = parse_flow_tokens_from_text(
+        #         generated_text, 
+        #         expected_length=expected_len, 
+        #         num_views=num_views, 
+        #         enforce_format=False
+        #     )
             
-            if flow_tokens:
-                print(f"Parsed {len(flow_tokens)} flow tokens")
-                # Decode flow tokens to tracks
-                tracks = self._decode_flow_tokens_to_tracks(flow_tokens, n_tracks=400, views=num_views)
-                if tracks is not None:
-                    # Visualize tracks on images
-                    vis_image = self._visualize_flow_tracks(images, tracks)
-                    if vis_image is not None:
-                        # Save visualization (you can modify this to display or save elsewhere)
-                        import os
-                        os.makedirs("debug_visualizations", exist_ok=True)
-                        import cv2
-                        vis_path = f"debug_visualizations/flow_vis_{int(time.time() * 1000)}.png"
-                        cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
-                        print(f"Saved flow visualization to {vis_path}")
-                else:
-                    print("Failed to decode flow tokens to tracks (motion tokenizer may not be loaded)")
-            else:
-                print("No flow tokens found in generated text")
+        #     if flow_tokens:
+        #         print(f"Parsed {len(flow_tokens)} flow tokens")
+        #         # Decode flow tokens to tracks
+        #         tracks = self._decode_flow_tokens_to_tracks(flow_tokens, n_tracks=400, views=num_views)
+        #         if tracks is not None:
+        #             # Visualize tracks on images
+        #             vis_image = self._visualize_flow_tracks(images, tracks)
+        #             if vis_image is not None:
+        #                 # Save visualization (you can modify this to display or save elsewhere)
+        #                 import os
+        #                 os.makedirs("debug_visualizations", exist_ok=True)
+        #                 import cv2
+        #                 vis_path = f"debug_visualizations/flow_vis_{int(time.time() * 1000)}.png"
+        #                 cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
+        #                 print(f"Saved flow visualization to {vis_path}")
+        #         else:
+        #             print("Failed to decode flow tokens to tracks (motion tokenizer may not be loaded)")
+        #     else:
+        #         print("No flow tokens found in generated text")
         
         delta_action = self.normalizer.unnormalize(n_actions, key="action")
+        gt_delta_action = self.delta_action_transform({"actions": obs["gt_action_chunks"], "states": state})["actions"]
+        n_gt_delta_action = self.normalizer.normalize(gt_delta_action, key="action")
+        diff = np.abs(n_actions - n_gt_delta_action).mean()
+        self.l1_action_loss.append(diff)
+        print(f"L1 action difference (normalied delta): {diff}")
         action = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
         left_action = action[:, :7]
         right_action = action[:, 7:]
@@ -379,7 +392,12 @@ class MolmoActAgent(PolicyAgent):
             })
         return actions_list
 
-    
+    def compare_replay(self) -> None:
+        """Compare replay with ground truth actions."""
+        l1_action_loss = np.array(self.l1_action_loss)
+        print(f"L1 action loss mean: {l1_action_loss.mean()}")
+        print(f"L1 action loss max: {l1_action_loss.max()}")
+
     @remote(serialization_needed=True)
     def action_spec(self) -> ActionSpec:
         """Define the action specification."""
