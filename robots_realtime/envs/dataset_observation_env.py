@@ -140,6 +140,7 @@ class DatasetObservationEnv(RobotEnv):
         
         observations["gt_action_chunks"] = np.concatenate(action_chunks, axis=-1)
         observations["timestamp_end"] = time.time()
+        observations["cur_step"] = self._dataset_step
         return observations
     
     def _compare_actions(self, predicted_action: Dict[str, Any], gt_action: Dict[str, Any]) -> bool:

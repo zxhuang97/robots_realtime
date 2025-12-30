@@ -57,6 +57,7 @@ class RobotEnv(dm_env.Environment):
                     "arm_pos": home_pos,
                     "gripper_pos": current_gripper_pos,
                 }
+        self.cur_step = 0
 
     def robot(self, name: str) -> Robot:
         """Get the robot object.
@@ -73,7 +74,7 @@ class RobotEnv(dm_env.Environment):
         return 0
 
     def _apply_action(self, action_dict: Dict[str, Any]) -> None:
-        return
+        # return
         with return_futures(*self._robot_dict.values()):  # type: ignore
             for name, action in action_dict.items():
                 if name == "base":
@@ -97,10 +98,11 @@ class RobotEnv(dm_env.Environment):
             # get action at time t
             self._apply_action(action)
         t2 = time.time()
-        if metadata["strict_rate"]:
-            self._rate.sleep()  # sleep until next timestep
-        else:
+        if metadata is not None and not metadata["strict_rate"]:
             time.sleep(self._rate.dt - (t2 - t1))
+        else:
+            self._rate.sleep()  # sleep until next timestep
+        self.cur_step += 1
         # return observation at time t+1
         return self.get_obs()
 
@@ -141,7 +143,7 @@ class RobotEnv(dm_env.Environment):
             # end_time = time.time()
             # print(f"time taken to get camera data for {name}: {(end_time - start_time) * 1000} ms")
         observations["timestamp_end"] = time.time()
-
+        observations["cur_step"] = self.cur_step
         return observations
 
     def reset(self, reset_pos: Optional[Dict[str, Dict[str, np.ndarray]]] = None, duration: float = 2.0) -> Dict[str, Any]:  # type: ignore
@@ -154,6 +156,7 @@ class RobotEnv(dm_env.Environment):
         target_pos = reset_pos if reset_pos is not None else self._reset_pos
         if target_pos is not None:
             return self.move_to_target_slowly(target_pos, duration=duration)
+        self.cur_step = 0
         return self.get_obs()
 
     def _get_obs_for_movement(self) -> Dict[str, Any]:

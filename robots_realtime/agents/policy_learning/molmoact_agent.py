@@ -18,36 +18,13 @@ import torch.nn.functional as F
 import cv2
 import sys
 sys.path.append("FAR_molmoact")
+sys.path.append("FAR_molmoact/AMPLIFY")
 from olmo.transforms import Normalizer, make_bool_mask, AbsoluteActions, DeltaActions
 from einops import rearrange
 
 torch.set_float32_matmul_precision('high')
 
-def compute_action_optimized(model, full_hidden_states, inputs, state_tensor):
-    """Reuse hidden states from buffer to compute actions."""
-    with torch.inference_mode():
-        with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
-            # Construct vl_mask
-            prompt_mask = inputs.get('attention_mask')
-            if prompt_mask is None:
-                prompt_len = inputs['input_ids'].shape[1]
-                prompt_mask = torch.ones((full_hidden_states.shape[0], prompt_len), device=full_hidden_states.device)
-            else:
-                prompt_mask = prompt_mask.to(full_hidden_states.device)
-                
-            # The generated part is valid
-            generated_mask = torch.ones((full_hidden_states.shape[0], full_hidden_states.shape[1] - prompt_mask.shape[1]), device=full_hidden_states.device)
-            vl_mask = torch.cat([prompt_mask, generated_mask], dim=1).bool()
-            
-            # Knowledge insulation logic
-            if model.config.action_expert_config.knowledge_insulation:
-                x_for_action = full_hidden_states.detach()
-            else:
-                x_for_action = full_hidden_states
-                
-            predicted_actions = model.action_expert.predict_action(x_for_action, state_tensor, vl_mask)
-            
-    return predicted_actions
+
 
 def parse_flow_tokens_from_text(text: str, expected_length: int = 15, num_views: int = 2, enforce_format=False) -> Optional[list[int]]:
     """Parse flow tokens from model output text.
@@ -118,6 +95,7 @@ def prepare_inputs(imgs, language_instruction, processor, device):
         add_generation_prompt=True,
     )
     text = "User: " + text + " Assistant: The future motion of the image is "
+    # text = "User: " + text + " Assistant:"
     inputs = processor(
         images=[imgs],
         text=text,
@@ -126,6 +104,31 @@ def prepare_inputs(imgs, language_instruction, processor, device):
     )
     return {k: v.to(device) for k, v in inputs.items()}
 
+def compute_action_optimized(model, full_hidden_states, inputs, state_tensor):
+    """Reuse hidden states from buffer to compute actions."""
+    with torch.inference_mode():
+        with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+            # Construct vl_mask
+            prompt_mask = inputs.get('attention_mask')
+            if prompt_mask is None:
+                prompt_len = inputs['input_ids'].shape[1]
+                prompt_mask = torch.ones((full_hidden_states.shape[0], prompt_len), device=full_hidden_states.device)
+            else:
+                prompt_mask = prompt_mask.to(full_hidden_states.device)
+                
+            # The generated part is valid
+            generated_mask = torch.ones((full_hidden_states.shape[0], full_hidden_states.shape[1] - prompt_mask.shape[1]), device=full_hidden_states.device)
+            vl_mask = torch.cat([prompt_mask, generated_mask], dim=1).bool()
+            
+            # Knowledge insulation logic
+            if model.config.action_expert_config.knowledge_insulation:
+                x_for_action = full_hidden_states.detach()
+            else:
+                x_for_action = full_hidden_states
+                
+            predicted_actions = model.action_expert.predict_action(x_for_action, state_tensor, vl_mask)
+            
+    return predicted_actions
 
 def generate_and_predict_optimized(model, inputs, processor, state, debug=False):
     """Generate tokens and predict actions using optimized path.
@@ -159,7 +162,7 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
                 max_new_tokens=75, 
                 output_hidden_states=False, 
                 return_dict_in_generate=True,
-                # cache_implementation="static",
+                cache_implementation="static",
                 disable_compile=True
             )
             generated_ids = generation_output.sequences
@@ -179,6 +182,47 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
     n_actions = compute_action_optimized(model, full_hidden_states, inputs, state_tensor)
     return n_actions, generated_text
 
+def generate_and_predict_original(model, inputs, processor, state, debug=False):
+    """Generate tokens and predict actions using optimized path.
+    
+    Returns:
+        Tuple of (n_actions, generated_text) if debug=True, else just n_actions
+    """
+    generated_ids = None
+    t1 = time.time()
+    with torch.inference_mode():
+        with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+            generated_ids = model.generate(**inputs, max_new_tokens=75)
+
+    t2 = time.time()
+    print(f"[generation] time: {t2 - t1} seconds")
+    generated_tokens = generated_ids[:, inputs['input_ids'].size(1):]
+    generated_text = processor.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+    
+    if debug:
+         print(f"generated text: {generated_text}")
+
+    state_tensor = torch.from_numpy(state).float().to(model.device).unsqueeze(0)
+  
+    generated_part = generated_ids[:, inputs['input_ids'].shape[1]:]
+    if generated_part.device != inputs['input_ids'].device:
+        generated_part = generated_part.to(inputs['input_ids'].device)
+    generated_part = generated_part[:, :-1] # ignore the eos
+    full_input_ids = torch.cat([inputs['input_ids'], generated_part], dim=1)
+    with torch.inference_mode():
+        with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+            outputs = model(
+                input_ids=full_input_ids,
+                images=inputs['images'],
+                # Pass other potential inputs if they exist in inputs dict
+                image_masks=inputs.get('image_masks'),
+                pooled_patches_idx=inputs.get('pooled_patches_idx'),
+                attention_mask=torch.ones_like(full_input_ids), 
+                logits_to_keep=0,
+                states=state_tensor
+            )
+    n_actions = outputs.predicted_actions
+    return n_actions, generated_text
 
 @dataclass
 class MolmoActAgent(PolicyAgent):
@@ -191,11 +235,12 @@ class MolmoActAgent(PolicyAgent):
     chat_template: str = "demo"
     camera_names: list[str] = field(default_factory=lambda: ["top_camera", "left_camera", "right_camera"])
     debug: bool = False
-    action_chunk: int = 8
+    action_chunk: int = 16
     norm_stats_path: Optional[str] = None
     motion_tokenizer_checkpoint: Optional[str] = None  # Path to motion tokenizer for flow visualization
     train_shape: Tuple[int, int] = (224, 168)
     resize_to_train_shape: bool = True
+    use_optimized_generation: bool = True
     
     def __post_init__(self):
         """Load model and processor."""
@@ -238,7 +283,7 @@ class MolmoActAgent(PolicyAgent):
         for camera_name in self.camera_names:
             img = obs[camera_name]["images"]["rgb"].astype(np.uint8)
             if self.resize_to_train_shape:
-                img = cv2.resize(img, self.train_shape, interpolation=cv2.INTER_LINEAR)
+                img = cv2.resize(img, self.train_shape, interpolation=cv2.INTER_AREA)
             images.append(img)
         return images
     
@@ -335,52 +380,62 @@ class MolmoActAgent(PolicyAgent):
         )
         
         # Generate action
-        result = generate_and_predict_optimized(
-            self.model, 
-            inputs, 
-            self.processor, 
-            n_state, 
-            debug=self.debug
-        )
+        if self.use_optimized_generation:
+            result = generate_and_predict_optimized(
+                self.model, 
+                inputs, 
+                self.processor, 
+                n_state, 
+                debug=self.debug
+            )
+        else:
+            result = generate_and_predict_original(
+                self.model, 
+                inputs, 
+                self.processor, 
+                n_state, 
+                debug=self.debug
+            )
         n_actions, generated_text = result
         n_actions = n_actions.float().cpu().numpy()[0]
         # Parse and visualize flow tokens in debug mode
-        # if self.debug and generated_text:
-        #     num_views = len(images)
-        #     expected_len = 15  # Default expected length for flow tokens
-        #     flow_tokens = parse_flow_tokens_from_text(
-        #         generated_text, 
-        #         expected_length=expected_len, 
-        #         num_views=num_views, 
-        #         enforce_format=False
-        #     )
+        if self.debug and generated_text:
+            num_views = len(images)
+            expected_len = 15  # Default expected length for flow tokens
+            flow_tokens = parse_flow_tokens_from_text(
+                generated_text, 
+                expected_length=expected_len, 
+                num_views=num_views, 
+                enforce_format=False
+            )
             
-        #     if flow_tokens:
-        #         print(f"Parsed {len(flow_tokens)} flow tokens")
-        #         # Decode flow tokens to tracks
-        #         tracks = self._decode_flow_tokens_to_tracks(flow_tokens, n_tracks=400, views=num_views)
-        #         if tracks is not None:
-        #             # Visualize tracks on images
-        #             vis_image = self._visualize_flow_tracks(images, tracks)
-        #             if vis_image is not None:
-        #                 # Save visualization (you can modify this to display or save elsewhere)
-        #                 import os
-        #                 os.makedirs("debug_visualizations", exist_ok=True)
-        #                 import cv2
-        #                 vis_path = f"debug_visualizations/flow_vis_{int(time.time() * 1000)}.png"
-        #                 cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
-        #                 print(f"Saved flow visualization to {vis_path}")
-        #         else:
-        #             print("Failed to decode flow tokens to tracks (motion tokenizer may not be loaded)")
-        #     else:
-        #         print("No flow tokens found in generated text")
+            if flow_tokens:
+                print(f"Parsed {len(flow_tokens)} flow tokens")
+                # Decode flow tokens to tracks
+                tracks = self._decode_flow_tokens_to_tracks(flow_tokens, n_tracks=400, views=num_views)
+                if tracks is not None:
+                    # Visualize tracks on images
+                    vis_image = self._visualize_flow_tracks(images, tracks)
+                    if vis_image is not None:
+                        # Save visualization (you can modify this to display or save elsewhere)
+                        import os
+                        os.makedirs("debug_visualizations", exist_ok=True)
+                        import cv2
+                        vis_path = f"debug_visualizations/flow_vis_{obs['cur_step']}.png"
+                        cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
+                        print(f"Saved flow visualization to {vis_path}")
+                else:
+                    print("Failed to decode flow tokens to tracks (motion tokenizer may not be loaded)")
+            else:
+                print("No flow tokens found in generated text")
         
         delta_action = self.normalizer.unnormalize(n_actions, key="action")
-        gt_delta_action = self.delta_action_transform({"actions": obs["gt_action_chunks"], "states": state})["actions"]
-        n_gt_delta_action = self.normalizer.normalize(gt_delta_action, key="action")
-        diff = np.abs(n_actions - n_gt_delta_action).mean()
-        self.l1_action_loss.append(diff)
-        print(f"L1 action difference (normalied delta): {diff}")
+        if self.debug:
+            gt_delta_action = self.delta_action_transform({"actions": obs["gt_action_chunks"], "states": state})["actions"]
+            n_gt_delta_action = self.normalizer.normalize(gt_delta_action, key="action")
+            diff = np.abs(n_actions - n_gt_delta_action).mean()
+            self.l1_action_loss.append(diff)
+            print(f"L1 action difference (normalied delta): {diff}")
         action = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
         left_action = action[:, :7]
         right_action = action[:, 7:]

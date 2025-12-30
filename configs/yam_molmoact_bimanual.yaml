@@ -31,10 +31,13 @@ agent:
   task_description: handoff
   action_chunk: 16
   debug: false
+  motion_tokenizer_checkpoint: /home/zixuan/robots_realtime/checkpoints/xdof_all_cs30_tokenizer/latest.pt
+  resize_to_train_shape: true
+  train_shape: [224, 168]
 
-dataset_observation_dir: "../xdof_epi/handoff_2/" # REPLACE THIS with your actual dataset directory
+dataset_observation_dir: "../xdof_epi/handoff_3_low/" # REPLACE THIS with your actual dataset directory
 action_threshold: 1 # Threshold for action comparison (not used with ReplayAgent, but required)
-hz: 10
+hz: 30
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
   extrinsics:
@@ -57,5 +60,5 @@ home_pos:
   - 0.0158
   - -0.0120
 
-max_steps: 200
+max_steps: 250
 

@@ -27,7 +27,8 @@ robots:
 
 agent:
   _target_: robots_realtime.agents.replay_agent.ReplayAgent
-  episode_dir: "../xdof_epi/handoff_2/" # REPLACE THIS with your actual episode path
+  # episode_dir: "../xdof_epi/handoff_2/" 
+  episode_dir: "../xdof_epi/stacking_hats_1/" 
   loop: false
 
 station_metadata:
@@ -52,4 +53,4 @@ home_pos:
   - 0.0158
   - -0.0120
 
-max_steps: 500
+max_steps: 150

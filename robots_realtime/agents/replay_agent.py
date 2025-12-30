@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 import cv2
+import imageio
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend to avoid GUI warnings
 import matplotlib.pyplot as plt
@@ -448,15 +449,10 @@ class ReplayAgent(Agent):
         side_by_side_width = target_width_dataset + target_width_replayed
         
         side_by_side_path = os.path.join(self.episode_dir, f"{camera_name}_side_by_side_comparison.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(side_by_side_path, fourcc, fps, (side_by_side_width, target_height))
-        
-        if not writer.isOpened():
-            cap.release()
-            return
         
         max_frames = min(len(images), int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
         
+        frames = []
         for frame_count in range(max_frames):
             ret, dataset_frame = cap.read()
             replayed_frame_bgr = cv2.cvtColor(images[frame_count], cv2.COLOR_RGB2BGR)
@@ -468,10 +464,13 @@ class ReplayAgent(Agent):
             cv2.putText(side_by_side_frame, "Dataset", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.putText(side_by_side_frame, "Replayed", (target_width_dataset + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
-            writer.write(side_by_side_frame)
+            # Convert BGR to RGB for imageio
+            side_by_side_frame_rgb = cv2.cvtColor(side_by_side_frame, cv2.COLOR_BGR2RGB)
+            frames.append(side_by_side_frame_rgb)
         
         cap.release()
-        writer.release()
+        
+        imageio.mimwrite(side_by_side_path, frames, fps=fps, codec='libx264')
         print(f"  Saved {camera_name} comparison video ({max_frames} frames)")
 
     def _create_camera_comparison_plot(self, camera_name: str, images: list, dataset_video_path: str) -> None:
