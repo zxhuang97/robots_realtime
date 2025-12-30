@@ -28,7 +28,7 @@ robots:
 agent:
   _target_: robots_realtime.agents.replay_agent.ReplayAgent
   # episode_dir: "../xdof_epi/handoff_2/" 
-  episode_dir: "../xdof_epi/stacking_hats_1/" 
+  episode_dir: "../xdof_epi/throw_bottle_1/" 
   loop: false
 
 station_metadata:
