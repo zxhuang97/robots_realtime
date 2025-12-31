@@ -15,13 +15,15 @@ from robots_realtime.agents.constants import ActionSpec
 from robots_realtime.robots.utils import Rate
 from robots_realtime.utils.portal_utils import remote
 
+import cv2
+
 
 class AsyncDiffusionAgent(PolicyAgent):
     def __init__(
         self,
         use_joint_state_as_action: bool = False,
         ip: str = "0.0.0.0",
-        port: int = 8111,
+        port: int = 8000,
         action_horizon: int = 25,
         inference_interval_s: float
         | None = None,  # if not None, open a thread to run inference loop at this interval, and use a buffer to smooth the action.
@@ -56,9 +58,9 @@ class AsyncDiffusionAgent(PolicyAgent):
                 "right-gripper_pos",
             ),
             image_keys=(
-                "left_camera-images-rgb",
-                "right_camera-images-rgb",
-                "top_camera-images-rgb",
+                "observation/left_camera-images-rgb",
+                "observation/right_camera-images-rgb",
+                "observation/top_camera-images-rgb",
             ),
         )
         self.action_lock = threading.Lock()
@@ -88,26 +90,31 @@ class AsyncDiffusionAgent(PolicyAgent):
 
     def obs_to_model_input(self, obs):
         flat_obs = []
-        obs = recusive_flatten(obs)
+        obs = recusive_flatten(obs, sep="-")
         for k in self.config.mlp_keys:
             flat_obs.append(obs[k])
         flat_obs = np.concatenate(flat_obs, axis=-1)
 
         images = {}
         for k in self.config.image_keys:
-            img = obs[k]Max error: 0.255970
-            img = image_tools.convert_to_uint8(image_tools.resize_with_pad(img, 224, 224))
+            # Remove "observation/" prefix if present to get the actual key in flattened obs
+            obs_key = k.replace("observation/", "")
+            img = obs[obs_key]
+            # img = image_tools.convert_to_uint8(image_tools.resize_with_pad(img, 224, 224))
+            img = cv2.resize(img, (224, 224))
             img = np.transpose(img, (2, 0, 1))
+            # Use the original key (with "observation/" prefix) for the model input
             images[k] = img
 
         return {
-            "state": flat_obs,
+            "observation/state": flat_obs,
             **images,
+            "prompt": "pick up plastic bottles and place them in the bin",
         }
 
     @remote()
     def act(self, obs):
-        super_action = super().act(obs)
+        super_action = {}  # Parent class doesn't implement act, so use empty dict
         a = np.array(self(obs))
         if self.use_joint_state_as_action:
             assert a.shape == (28,)
@@ -208,3 +215,7 @@ class AsyncDiffusionAgent(PolicyAgent):
         else:
             action = self._agent.get_action(self._obs)["actions"]
         return action
+
+
+# Alias for backward compatibility with configs
+AsyncPi0Agent = AsyncDiffusionAgent

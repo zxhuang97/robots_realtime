@@ -169,10 +169,10 @@ def generate_and_predict_optimized(model, inputs, processor, state, debug=False)
     t2 = time.time()
     print(f"[generation] time: {t2 - t1} seconds")
     generated_tokens = generated_ids[:, inputs['input_ids'].size(1):]
-    generated_text = processor.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
+    generated_text = None
     if debug:
-         print(f"generated text: {generated_text}")
+        print(f"generated text: {generated_text}")
+        generated_text = processor.batch_decode(generated_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 
     state_tensor = torch.from_numpy(state).float().to(model.device).unsqueeze(0)
 
