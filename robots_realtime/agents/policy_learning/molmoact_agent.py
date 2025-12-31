@@ -261,7 +261,8 @@ class MolmoActAgent(PolicyAgent):
             device_map="auto",
             # attn_implementation="sdpa",
         )
-        
+        print(self.unnorm_key)
+        print(self.model.norm_stats)
         self.normalizer = Normalizer(self.model.norm_stats[self.unnorm_key])
         
         delta_action_mask = make_bool_mask(6, -1, 6, -1)

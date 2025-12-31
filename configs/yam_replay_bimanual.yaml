@@ -28,7 +28,8 @@ robots:
 agent:
   _target_: robots_realtime.agents.replay_agent.ReplayAgent
   # episode_dir: "../xdof_epi/handoff_2/" 
-  episode_dir: "../xdof_epi/throw_bottle_1/" 
+  # episode_dir: "../xdof_epi/throw_bottle_1/" 
+  episode_dir: "/home/zixuan/robots_realtime/teleop_trajectories/2/" 
   loop: false
 
 station_metadata:
