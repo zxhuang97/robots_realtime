@@ -13,6 +13,6 @@ __pycache__/
 .venv/
 .ruff_cache/
 # FAR-molmoact
-checkpoints/
+checkpoints
 teleop_trajectories/
 wandb

@@ -224,6 +224,16 @@ def generate_and_predict_original(model, inputs, processor, state, debug=False):
     n_actions = outputs.predicted_actions
     return n_actions, generated_text
 
+def center_crop(img, scale):
+    """Center crop image."""
+    h, w = img.shape[:2]
+    new_h = int(h * scale)
+    new_w = int(w * scale)
+    img = img[h//2-new_h//2:h//2+new_h//2, w//2-new_w//2:w//2+new_w//2]
+
+    img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+    return img
+
 @dataclass
 class MolmoActAgent(PolicyAgent):
     """Agent that uses MolmoAct model for action prediction."""
@@ -241,6 +251,8 @@ class MolmoActAgent(PolicyAgent):
     train_shape: Tuple[int, int] = (224, 168)
     resize_to_train_shape: bool = True
     use_optimized_generation: bool = True
+    center_crop_scale: float = 0.95
+    crop_top_only: bool = False
     
     def __post_init__(self):
         """Load model and processor."""
@@ -262,7 +274,7 @@ class MolmoActAgent(PolicyAgent):
             # attn_implementation="sdpa",
         )
         print(self.unnorm_key)
-        print(self.model.norm_stats)
+        print(self.model.norm_stats[self.unnorm_key])
         self.normalizer = Normalizer(self.model.norm_stats[self.unnorm_key])
         
         delta_action_mask = make_bool_mask(6, -1, 6, -1)
@@ -284,7 +296,9 @@ class MolmoActAgent(PolicyAgent):
         for camera_name in self.camera_names:
             img = obs[camera_name]["images"]["rgb"].astype(np.uint8)
             if self.resize_to_train_shape:
-                img = cv2.resize(img, self.train_shape, interpolation=cv2.INTER_AREA)
+                img = cv2.resize(img, self.train_shape)
+            if self.center_crop_scale < 1.0 and (camera_name == "top_camera" or not self.crop_top_only):
+                img = center_crop(img, self.center_crop_scale)
             images.append(img)
         return images
     

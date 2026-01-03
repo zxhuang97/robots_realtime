@@ -199,7 +199,7 @@ def download_checkpoint(
     - "latest" (default) - downloads the most recent version
     
     Args:
-        path: Base local directory path to download the artifact to (will create a subdirectory with the artifact name)
+        path: Base local directory path to download the artifact to (will create a subdirectory with the artifact name and version)
         project: W&B project name
         entity: W&B entity (username or team name)
         artifact_name: Name of the artifact to download
@@ -219,8 +219,8 @@ def download_checkpoint(
     
     try:
         artifact = run.use_artifact(artifact_path)
-        # Download into a subdirectory named after the artifact
-        download_path = os.path.join(path, artifact_name)
+        # Download into a subdirectory named after the artifact and version
+        download_path = os.path.join(path, f"{artifact_name}_{version}")
         download_dir = artifact.download(root=download_path)
         print(f"Successfully downloaded artifact to '{download_dir}'")
     except Exception as e:
