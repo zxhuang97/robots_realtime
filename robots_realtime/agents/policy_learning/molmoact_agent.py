@@ -253,6 +253,7 @@ class MolmoActAgent(PolicyAgent):
     use_optimized_generation: bool = True
     center_crop_scale: float = 0.95
     crop_top_only: bool = False
+    use_abs_action: bool = False
     
     def __post_init__(self):
         """Load model and processor."""
@@ -443,14 +444,15 @@ class MolmoActAgent(PolicyAgent):
             else:
                 print("No flow tokens found in generated text")
         
-        delta_action = self.normalizer.unnormalize(n_actions, key="action")
+        actions = self.normalizer.unnormalize(n_actions, key="action")
         if self.debug:
             gt_delta_action = self.delta_action_transform({"actions": obs["gt_action_chunks"], "states": state})["actions"]
             n_gt_delta_action = self.normalizer.normalize(gt_delta_action, key="action")
             diff = np.abs(n_actions - n_gt_delta_action).mean()
             self.l1_action_loss.append(diff)
             print(f"L1 action difference (normalied delta): {diff}")
-        actions = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
+        if not self.use_abs_action:
+            actions = self.absolute_action_transform({"actions": actions, "state": state})["actions"]
         # left_action = action[:, :7]
         # right_action = action[:, 7:]
         # actions_list = []
@@ -469,15 +471,16 @@ class MolmoActAgent(PolicyAgent):
             self._last_results = self.infer(obs)
             self._action_counter = 0
         action = self._last_results[self._action_counter]
-        self._action_counter += 1
-        if self._action_counter >= len(self._last_results):
-            self._last_results = None
-            self._action_counter = 0
+
         commands = {
             "left": {"pos": action[:7]},
             "right": {"pos": action[7:]},
             "reset_timing": self._action_counter == 0,  # Reset timing on first action after slow inference
         }
+        self._action_counter += 1
+        if self._action_counter >= len(self._last_results):
+            self._last_results = None
+            self._action_counter = 0
         return commands
   
 

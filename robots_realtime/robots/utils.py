@@ -70,6 +70,9 @@ class Rate:
         if self.rate is None:
             return 0.0
         return 1.0 / self.rate
+        
+    def reset_timing(self) -> None:
+        self.last = time.time()
 
     def sleep(self) -> None:
         if self.rate is None:

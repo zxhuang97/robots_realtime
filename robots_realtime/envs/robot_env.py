@@ -95,7 +95,7 @@ class RobotEnv(dm_env.Environment):
         """
         # Reset timing reference after slow inference to avoid rapid "catch-up" execution
         if action.pop("reset_timing", False):
-            self._rate.last = time.time()
+            self._rate.reset_timing()
         if len(action) != 0:
             self._apply_action(action)
         self._rate.sleep()

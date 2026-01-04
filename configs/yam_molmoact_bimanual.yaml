@@ -28,7 +28,8 @@ robots:
 agent:
   _target_: robots_realtime.agents.policy_learning.molmoact_agent.MolmoActAgent
   checkpoint: "checkpoints/1228_xdof_bottle_old_pt160k_aug/step76000-hf-16"
-  # checkpoint: "checkpoints/1224_throw_bottle_60000/"
+  # checkpoint: "checkpoints/1228_xdof_bottle_vlm_no_flow_noaug_abs_action/step40000-hf"
+  # checkpoint: checkpoints/0101_xdof_bottle_abs_act_no_flow_pi_aug_1node/step48000-hf
   task_description: "throw plastic bottles in bin"
   action_chunk: 16
   debug: false
@@ -37,13 +38,15 @@ agent:
   train_shape: [224, 168]
   unnorm_key: "flow_tokenized"
   # unnorm_key: "rel_16"
+  # unnorm_key: "abs_16"
   center_crop_scale: 0.95
   crop_top_only: false
+  use_abs_action: false
 
 # dataset_observation_dir: "../xdof_epi/throw_bottle_1/" # REPLACE THIS with your actual dataset directory
 # action_threshold: 1 # Threshold for action comparison (not used with ReplayAgent, but required)
 hz: 20
-save_path: "experiments/test_epi2"
+save_path: "experiments/1228_xdof_bottle_vlm_no_flow_noaug_abs_action"
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
   extrinsics:
