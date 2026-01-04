@@ -140,53 +140,35 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig, keyboar
     """
     Run the main control loop with keyboard control.
 
-    Args:
-        env: Robot environment
-        agent: Agent instance
-        config: Configuration object
-        keyboard: Keyboard controller for runtime commands
-        
-    Keyboard commands:
-        p: Pause - stop moving and enter ipdb debugger
-        r: Reset - stop moving and reset arms to home position
-        q: Terminate - close env gracefully and exit
+    Keyboard: p=pause/debug, r=reset, q=quit
     """
     logger = logging.getLogger(__name__)
-    steps = 0
-    start_time = time.time()
-    loop_count = 0
+    steps, loop_count, start_time = 0, 0, time.time()
     reset_pos = agent.get_initial_state()
     obs = env.reset(reset_pos=reset_pos, duration=2.0)
     logger.info(f"Action spec: {env.action_spec()}")
 
-    # Main control loop
+    def handle_interrupt(msg: str) -> None:
+        logger.info(f"[Keyboard] {msg} - Type 'c' to continue")
+        keyboard.stop()
+        keyboard.start()
+
     while True:
-        # Check for keyboard commands
         command = keyboard.check_input()
         
         if command == ControlCommand.PAUSE:
-            logger.info("[Keyboard] PAUSE - Entering debugger. Type 'c' to continue.")
-            # Enter debugger - terminal settings are temporarily restored for input
-            keyboard.stop()
-            keyboard.start()
-            logger.info("[Keyboard] Resuming control loop...")
-            obs = env.get_obs()  # Get fresh observation after pause
+            handle_interrupt("PAUSE")
+            obs = env.get_obs()
             continue
-            
         elif command == ControlCommand.RESET:
-            logger.info("[Keyboard] RESET - Moving to home position... ")
-            logger.info("Type 'c' to continue")
-            keyboard.stop()
-            keyboard.start()
-            logger.info("[Keyboard] Resuming control loop...")
+            handle_interrupt("RESET")
             obs = env.reset(reset_pos=reset_pos, duration=2.0)
             continue
-            
         elif command == ControlCommand.TERMINATE:
-            logger.info("[Keyboard] TERMINATE - Shutting down gracefully...")
+            logger.info("[Keyboard] TERMINATE - Shutting down...")
             break
-        
-        # Normal control loop execution
+
+        # Execute action(s)
         action = agent.act(obs)
         if isinstance(action, dict):
             obs = env.step(action)
@@ -200,14 +182,13 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig, keyboar
             print("Execution chunk of length ", len(action), " took ", t2 - t1, " seconds")
         loop_count += 1
 
-        elapsed_time = time.time() - start_time
-        if elapsed_time >= 1:
-            calculated_frequency = loop_count / elapsed_time
-            logger.info(f"Control loop frequency: {calculated_frequency:.2f} Hz")
-            start_time = time.time()
-            loop_count = 0
+        # Log frequency every second
+        elapsed = time.time() - start_time
+        if elapsed >= 1:
+            logger.info(f"Control loop frequency: {steps / elapsed:.2f} Hz")
+            start_time, loop_count = time.time(), 0
 
-        if config.max_steps is not None and steps >= config.max_steps:
+        if config.max_steps and steps >= config.max_steps:
             logger.info(f"Reached max steps ({config.max_steps}), stopping...")
             agent.compare_replay()
             break
