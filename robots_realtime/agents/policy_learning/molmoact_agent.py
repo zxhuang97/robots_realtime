@@ -280,7 +280,8 @@ class MolmoActAgent(PolicyAgent):
         delta_action_mask = make_bool_mask(6, -1, 6, -1)
         self.absolute_action_transform = AbsoluteActions(mask=delta_action_mask)
         self.delta_action_transform = DeltaActions(mask=delta_action_mask)
-
+        self._last_results: Dict[str, np.ndarray] | None = None
+        self._action_counter = 0
         self.l1_action_loss = []
         # Load motion tokenizer for debug visualization if provided
         self.motion_tokenizer = None
@@ -379,10 +380,8 @@ class MolmoActAgent(PolicyAgent):
         
         return vis
     
-    @remote()
-    def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate action from observation."""
-        # Extract images and state
+    def infer(self, obs: Dict[str, Any]) -> Dict[str, Any]:
+              # Extract images and state
         images = self._extract_images(obs)
         state = self._extract_state(obs)
         n_state = self.normalizer.normalize(state, key="state")
@@ -451,16 +450,36 @@ class MolmoActAgent(PolicyAgent):
             diff = np.abs(n_actions - n_gt_delta_action).mean()
             self.l1_action_loss.append(diff)
             print(f"L1 action difference (normalied delta): {diff}")
-        action = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
-        left_action = action[:, :7]
-        right_action = action[:, 7:]
-        actions_list = []
-        for i in range(len(left_action)):
-            actions_list.append({
-                "left": {"pos": left_action[i]},
-                "right": {"pos": right_action[i]},
-            })
-        return actions_list
+        actions = self.absolute_action_transform({"actions": delta_action, "state": state})["actions"]
+        # left_action = action[:, :7]
+        # right_action = action[:, 7:]
+        # actions_list = []
+        # for i in range(len(left_action)):
+        #     actions_list.append({
+        #         "left": {"pos": left_action[i]},
+        #         "right": {"pos": right_action[i]},
+        #     })
+        # return actions_list
+        return actions
+
+    @remote()
+    def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate action from observation."""
+        if self._last_results is None:
+            self._last_results = self.infer(obs)
+            self._action_counter = 0
+        action = self._last_results[self._action_counter]
+        self._action_counter += 1
+        if self._action_counter >= len(self._last_results):
+            self._last_results = None
+            self._action_counter = 0
+        commands = {
+            "left": {"pos": action[:7]},
+            "right": {"pos": action[7:]},
+            "reset_timing": self._action_counter == 0,  # Reset timing on first action after slow inference
+        }
+        return commands
+  
 
     def compare_replay(self) -> None:
         """Compare replay with ground truth actions."""

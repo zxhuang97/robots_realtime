@@ -93,15 +93,12 @@ class RobotEnv(dm_env.Environment):
         Returns:
             obs: observation from the environment.
         """
-        t1 = time.time()
+        # Reset timing reference after slow inference to avoid rapid "catch-up" execution
+        if action.pop("reset_timing", False):
+            self._rate.last = time.time()
         if len(action) != 0:
-            # get action at time t
             self._apply_action(action)
-        t2 = time.time()
-        if metadata is not None and not metadata["strict_rate"]:
-            time.sleep(self._rate.dt - (t2 - t1))
-        else:
-            self._rate.sleep()  # sleep until next timestep
+        self._rate.sleep()
         self.cur_step += 1
         # return observation at time t+1
         return self.get_obs()

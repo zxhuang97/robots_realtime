@@ -170,22 +170,23 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig, keyboar
 
         # Execute action(s)
         action = agent.act(obs)
-        if isinstance(action, dict):
-            obs = env.step(action)
-            steps += 1
-        elif isinstance(action, list):
-            t1 = time.time()
-            for i, a in enumerate(action):
-                obs = env.step(a, metadata={"strict_rate": i!=0})
-                steps += 1
-            t2 = time.time()
-            print("Execution chunk of length ", len(action), " took ", t2 - t1, " seconds")
+        obs = env.step(action)
+        steps += 1
+        # if isinstance(action, dict):
+            
+        # elif isinstance(action, list):
+        #     t1 = time.time()
+        #     for i, a in enumerate(action):
+        #         obs = env.step(a, metadata={"reset_timing": i==0})
+        #         steps += 1
+        #     t2 = time.time()
+        #     print("Execution chunk of length ", len(action), " took ", t2 - t1, " seconds")
         loop_count += 1
 
         # Log frequency every second
         elapsed = time.time() - start_time
         if elapsed >= 1:
-            logger.info(f"Control loop frequency: {steps / elapsed:.2f} Hz")
+            logger.info(f"Control loop frequency: {loop_count / elapsed:.2f} Hz")
             start_time, loop_count = time.time(), 0
 
         if config.max_steps and steps >= config.max_steps:

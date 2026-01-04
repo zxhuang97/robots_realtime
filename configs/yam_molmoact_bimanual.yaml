@@ -27,7 +27,7 @@ robots:
 
 agent:
   _target_: robots_realtime.agents.policy_learning.molmoact_agent.MolmoActAgent
-  checkpoint: "checkpoints/1228_xdof_bottle_old_pt160k_aug_step76000-hf-16"
+  checkpoint: "checkpoints/1228_xdof_bottle_old_pt160k_aug/step76000-hf-16"
   # checkpoint: "checkpoints/1224_throw_bottle_60000/"
   task_description: "throw plastic bottles in bin"
   action_chunk: 16
