@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
-import ipdb
 import numpy as np
 import tyro
 
@@ -16,6 +15,7 @@ from robots_realtime.agents.agent import Agent
 from robots_realtime.agents.replay_agent import ReplayAgent
 from robots_realtime.envs.configs.instantiate import instantiate
 from robots_realtime.envs.configs.loader import DictLoader
+from robots_realtime.envs.recorder import AsyncObservationRecorder
 from robots_realtime.envs.robot_env import RobotEnv
 from robots_realtime.envs.dataset_observation_env import DatasetObservationEnv
 from robots_realtime.robots.robot import Robot
@@ -39,7 +39,8 @@ class LaunchConfig:
     cameras: Dict[str, Tuple[CameraDriver, int]] = field(default_factory=dict)
     robots: Dict[str, Union[str, Robot]] = field(default_factory=dict)
     max_steps: Optional[int] = None  # this is for testing
-    save_path: Optional[str] = None
+    save_path: Optional[str] = None  # Directory to save observations and images
+    camera_names: List[str] = field(default_factory=lambda: ["top_camera", "left_camera", "right_camera"])  # Camera names for recording
     station_metadata: Dict[str, str] = field(default_factory=dict)
     reset_pos: Optional[List[float]] = None  # Reset position for robots (arm joints only, gripper preserved)
     home_pos: Optional[List[float]] = None  # Home position for robots (arm joints only, gripper preserved)
@@ -148,51 +149,59 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig, keyboar
     obs = env.reset(reset_pos=reset_pos, duration=2.0)
     logger.info(f"Action spec: {env.action_spec()}")
 
+    # Setup recorder if save_path is configured
+    recorder: Optional[AsyncObservationRecorder] = None
+    if config.save_path:
+        logger.info(f"Recording observations to: {config.save_path}")
+        recorder = AsyncObservationRecorder(config.save_path, config.camera_names)
+        recorder.start()
+
     def handle_interrupt(msg: str) -> None:
         logger.info(f"[Keyboard] {msg} - Type 'c' to continue")
         keyboard.stop()
         keyboard.start()
 
-    while True:
-        command = keyboard.check_input()
-        
-        if command == ControlCommand.PAUSE:
-            handle_interrupt("PAUSE")
-            obs = env.get_obs()
-            continue
-        elif command == ControlCommand.RESET:
-            handle_interrupt("RESET")
-            obs = env.reset(reset_pos=reset_pos, duration=2.0)
-            continue
-        elif command == ControlCommand.TERMINATE:
-            logger.info("[Keyboard] TERMINATE - Shutting down...")
-            break
-
-        # Execute action(s)
-        action = agent.act(obs)
-        obs = env.step(action)
-        steps += 1
-        # if isinstance(action, dict):
+    try:
+        while True:
+            command = keyboard.check_input()
             
-        # elif isinstance(action, list):
-        #     t1 = time.time()
-        #     for i, a in enumerate(action):
-        #         obs = env.step(a, metadata={"reset_timing": i==0})
-        #         steps += 1
-        #     t2 = time.time()
-        #     print("Execution chunk of length ", len(action), " took ", t2 - t1, " seconds")
-        loop_count += 1
+            if command == ControlCommand.PAUSE:
+                handle_interrupt("PAUSE")
+                obs = env.get_obs()
+                continue
+            elif command == ControlCommand.RESET:
+                handle_interrupt("RESET")
+                obs = env.reset(reset_pos=reset_pos, duration=2.0)
+                continue
+            elif command == ControlCommand.TERMINATE:
+                logger.info("[Keyboard] TERMINATE - Shutting down...")
+                break
 
-        # Log frequency every second
-        elapsed = time.time() - start_time
-        if elapsed >= 1:
-            logger.info(f"Control loop frequency: {loop_count / elapsed:.2f} Hz")
-            start_time, loop_count = time.time(), 0
+            # Record observation before action
+            if recorder is not None:
+                recorder.record(steps, obs)
 
-        if config.max_steps and steps >= config.max_steps:
-            logger.info(f"Reached max steps ({config.max_steps}), stopping...")
-            agent.compare_replay()
-            break
+            # Execute action(s)
+            action = agent.act(obs)
+            obs = env.step(action)
+            steps += 1
+            loop_count += 1
+
+            # Log frequency every second
+            elapsed = time.time() - start_time
+            if elapsed >= 1:
+                logger.info(f"Control loop frequency: {loop_count / elapsed:.2f} Hz")
+                start_time, loop_count = time.time(), 0
+
+            if config.max_steps and steps >= config.max_steps:
+                logger.info(f"Reached max steps ({config.max_steps}), stopping...")
+                agent.compare_replay()
+                break
+    finally:
+        if recorder is not None:
+            logger.info("Stopping observation recorder...")
+            recorder.stop()
+            logger.info(f"Saved {steps} observations to {config.save_path}")
 
 
 
