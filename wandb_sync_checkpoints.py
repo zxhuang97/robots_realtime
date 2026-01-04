@@ -220,7 +220,7 @@ def download_checkpoint(
     try:
         artifact = run.use_artifact(artifact_path)
         # Download into a subdirectory named after the artifact and version
-        download_path = os.path.join(path, f"{artifact_name}_{version}")
+        download_path = os.path.join(path, artifact_name, version)
         download_dir = artifact.download(root=download_path)
         print(f"Successfully downloaded artifact to '{download_dir}'")
     except Exception as e:

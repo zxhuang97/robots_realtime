@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
+import ipdb
 import numpy as np
 import tyro
 
@@ -20,6 +21,7 @@ from robots_realtime.envs.dataset_observation_env import DatasetObservationEnv
 from robots_realtime.robots.robot import Robot
 from robots_realtime.robots.utils import Rate, Timeout
 from robots_realtime.sensors.cameras.camera import CameraDriver
+from robots_realtime.utils.keyboard_control import KeyboardController, ControlCommand
 from robots_realtime.utils.launch_utils import (
     cleanup_processes,
     initialize_agent,
@@ -121,27 +123,33 @@ def main(args: Args) -> None:
             )
 
         logger.info("Starting control loop...")
-        _run_control_loop(env, agent, main_config)
+        with KeyboardController() as keyboard:
+            _run_control_loop(env, agent, main_config, keyboard)
     
-    except KeyboardInterrupt:
-        logger.info("Received KeyboardInterrupt (Ctrl+C), shutting down gracefully...")
     except Exception as e:
         logger.error(f"Error during execution: {e}")
         raise e
     finally:
-        # Cleanup - this will always run, even on KeyboardInterrupt
+        # Cleanup - this will always run
         logger.info("[main] Shutting down... ")
-        env.close()
+        if env is not None:
+            env.close()
 
 
-def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None:
+def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig, keyboard: KeyboardController) -> None:
     """
-    Run the main control loop.
+    Run the main control loop with keyboard control.
 
     Args:
         env: Robot environment
         agent: Agent instance
         config: Configuration object
+        keyboard: Keyboard controller for runtime commands
+        
+    Keyboard commands:
+        p: Pause - stop moving and enter ipdb debugger
+        r: Reset - stop moving and reset arms to home position
+        q: Terminate - close env gracefully and exit
     """
     logger = logging.getLogger(__name__)
     steps = 0
@@ -153,6 +161,32 @@ def _run_control_loop(env: RobotEnv, agent: Agent, config: LaunchConfig) -> None
 
     # Main control loop
     while True:
+        # Check for keyboard commands
+        command = keyboard.check_input()
+        
+        if command == ControlCommand.PAUSE:
+            logger.info("[Keyboard] PAUSE - Entering debugger. Type 'c' to continue.")
+            # Enter debugger - terminal settings are temporarily restored for input
+            keyboard.stop()
+            keyboard.start()
+            logger.info("[Keyboard] Resuming control loop...")
+            obs = env.get_obs()  # Get fresh observation after pause
+            continue
+            
+        elif command == ControlCommand.RESET:
+            logger.info("[Keyboard] RESET - Moving to home position... ")
+            logger.info("Type 'c' to continue")
+            keyboard.stop()
+            keyboard.start()
+            logger.info("[Keyboard] Resuming control loop...")
+            obs = env.reset(reset_pos=reset_pos, duration=2.0)
+            continue
+            
+        elif command == ControlCommand.TERMINATE:
+            logger.info("[Keyboard] TERMINATE - Shutting down gracefully...")
+            break
+        
+        # Normal control loop execution
         action = agent.act(obs)
         if isinstance(action, dict):
             obs = env.step(action)
