@@ -27,7 +27,7 @@ robots:
 
 agent:
   _target_: robots_realtime.agents.policy_learning.molmoact_agent.MolmoActAgent
-  checkpoint: "checkpoints/1228_xdof_bottle_old_pt160k_aug_step76000-hf"
+  checkpoint: "checkpoints/1228_xdof_bottle_old_pt160k_aug_step76000-hf-16"
   # checkpoint: "checkpoints/1224_throw_bottle_60000/"
   task_description: "throw plastic bottles in bin"
   action_chunk: 16
@@ -42,7 +42,7 @@ agent:
 
 # dataset_observation_dir: "../xdof_epi/throw_bottle_1/" # REPLACE THIS with your actual dataset directory
 action_threshold: 1 # Threshold for action comparison (not used with ReplayAgent, but required)
-hz: 30
+hz: 20
 station_metadata:
   world_frame: "left_arm" # front x, left y, up z
   extrinsics:

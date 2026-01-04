@@ -19,7 +19,7 @@ from robots_realtime.envs.configs.loader import DictLoader
 from robots_realtime.envs.robot_env import RobotEnv
 from robots_realtime.envs.dataset_observation_env import DatasetObservationEnv
 from robots_realtime.robots.robot import Robot
-from robots_realtime.robots.utils import Rate, Timeout
+from robots_realtime.robots.utils import Rate
 from robots_realtime.sensors.cameras.camera import CameraDriver
 from robots_realtime.utils.keyboard_control import KeyboardController, ControlCommand
 from robots_realtime.utils.launch_utils import (

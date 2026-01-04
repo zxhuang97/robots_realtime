@@ -204,12 +204,13 @@ def launch_remote_get_local_handler(
     custom_remote_methods: Optional[Dict[str, bool]] = None,
     logging_config_path: str | None = None,
     wait_time_on_close: float = 0.0,
+    timeout: int = 20,
 ) -> tuple[Any, Client]:
     if port is None:
         port = portal.free_port()
     p = launch_remote_server(cfg, port, host, launch_remote, process_pool, custom_remote_methods, logging_config_path, wait_time_on_close)
 
-    with Timeout(20, f"launching client: {cfg} at port {port}"):
+    with Timeout(timeout, f"launching client: {cfg} at port {port}"):
         assert port is not None
         client = Client(port, host)
     return p, client

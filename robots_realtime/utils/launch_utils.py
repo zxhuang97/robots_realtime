@@ -201,7 +201,7 @@ def initialize_agent(agent_cfg: Dict[str, Any], server_processes: List[Any]) -> 
             "get_initial_state": False,  # Needs serialization for dict return
             "compare_replay": False,
         }
-        _, agent = launch_remote_get_local_handler(agent_cfg, custom_remote_methods=agent_remote_methods)
+        _, agent = launch_remote_get_local_handler(agent_cfg, custom_remote_methods=agent_remote_methods, timeout=30)
         server_processes.append(_)  # Track the server process
 
     logger.info("Agent initialized")
